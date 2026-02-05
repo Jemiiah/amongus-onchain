@@ -1,0 +1,155 @@
+// Game Types for Among Us On-Chain
+
+export enum Role {
+  None = 0,
+  Crewmate = 1,
+  Impostor = 2,
+  Ghost = 3,
+}
+
+export enum Location {
+  Cafeteria = 0,
+  Admin = 1,
+  Storage = 2,
+  Electrical = 3,
+  MedBay = 4,
+  UpperEngine = 5,
+  LowerEngine = 6,
+  Security = 7,
+  Reactor = 8,
+}
+
+export const LocationNames: Record<Location, string> = {
+  [Location.Cafeteria]: "Cafeteria",
+  [Location.Admin]: "Admin",
+  [Location.Storage]: "Storage",
+  [Location.Electrical]: "Electrical",
+  [Location.MedBay]: "MedBay",
+  [Location.UpperEngine]: "Upper Engine",
+  [Location.LowerEngine]: "Lower Engine",
+  [Location.Security]: "Security",
+  [Location.Reactor]: "Reactor",
+};
+
+export enum GamePhase {
+  Lobby = 0,
+  Starting = 1,
+  ActionCommit = 2,
+  ActionReveal = 3,
+  Discussion = 4,
+  Voting = 5,
+  VoteResult = 6,
+  Ended = 7,
+}
+
+export const PhaseNames: Record<GamePhase, string> = {
+  [GamePhase.Lobby]: "Lobby",
+  [GamePhase.Starting]: "Starting",
+  [GamePhase.ActionCommit]: "Action Phase",
+  [GamePhase.ActionReveal]: "Revealing",
+  [GamePhase.Discussion]: "Discussion",
+  [GamePhase.Voting]: "Voting",
+  [GamePhase.VoteResult]: "Results",
+  [GamePhase.Ended]: "Game Over",
+};
+
+export enum SabotageType {
+  None = 0,
+  Lights = 1,
+  Reactor = 2,
+  O2 = 3,
+  Comms = 4,
+}
+
+export interface Player {
+  address: `0x${string}`;
+  colorId: number;
+  role: Role;
+  location: Location;
+  isAlive: boolean;
+  tasksCompleted: number;
+  totalTasks: number;
+  hasVoted: boolean;
+}
+
+export interface GameState {
+  gameId: bigint;
+  phase: GamePhase;
+  round: bigint;
+  phaseEndTime: bigint;
+  alivePlayers: number;
+  aliveCrewmates: number;
+  aliveImpostors: number;
+  totalTasksCompleted: number;
+  totalTasksRequired: number;
+  activeSabotage: SabotageType;
+  crewmatesWon: boolean;
+}
+
+export interface GameConfig {
+  minPlayers: number;
+  maxPlayers: number;
+  numImpostors: number;
+  wagerAmount: bigint;
+  actionTimeout: bigint;
+  tasksPerPlayer: number;
+}
+
+export interface DeadBody {
+  victim: `0x${string}`;
+  location: Location;
+  round: bigint;
+  reported: boolean;
+}
+
+export interface GameLog {
+  type: "kill" | "report" | "meeting" | "vote" | "eject" | "task" | "sabotage" | "join" | "start";
+  message: string;
+  timestamp: number;
+  round?: bigint;
+}
+
+// Player colors matching Among Us
+export const PlayerColors: Record<number, { name: string; hex: string; light: string }> = {
+  0: { name: "Red", hex: "#C51111", light: "#FF4D4D" },
+  1: { name: "Blue", hex: "#132ED1", light: "#4D6DFF" },
+  2: { name: "Green", hex: "#117F2D", light: "#4DFF7F" },
+  3: { name: "Pink", hex: "#ED54BA", light: "#FF8DD9" },
+  4: { name: "Orange", hex: "#EF7D0D", light: "#FFAB4D" },
+  5: { name: "Yellow", hex: "#F5F557", light: "#FFFF8D" },
+  6: { name: "Black", hex: "#3F474E", light: "#6B7580" },
+  7: { name: "White", hex: "#D6E0F0", light: "#FFFFFF" },
+  8: { name: "Purple", hex: "#6B2FBB", light: "#9B5FEB" },
+  9: { name: "Brown", hex: "#71491E", light: "#A17B4E" },
+  10: { name: "Cyan", hex: "#38FEDC", light: "#7AFFEC" },
+  11: { name: "Lime", hex: "#50EF39", light: "#8AFF6D" },
+};
+
+// Map layout coordinates for visualization
+export const MapLayout: Record<Location, { x: number; y: number; width: number; height: number }> = {
+  [Location.Cafeteria]: { x: 300, y: 50, width: 120, height: 80 },
+  [Location.Admin]: { x: 380, y: 170, width: 100, height: 70 },
+  [Location.Storage]: { x: 380, y: 280, width: 100, height: 70 },
+  [Location.Electrical]: { x: 260, y: 280, width: 100, height: 70 },
+  [Location.MedBay]: { x: 180, y: 170, width: 100, height: 70 },
+  [Location.UpperEngine]: { x: 60, y: 50, width: 100, height: 80 },
+  [Location.LowerEngine]: { x: 60, y: 280, width: 100, height: 70 },
+  [Location.Security]: { x: 60, y: 170, width: 100, height: 70 },
+  [Location.Reactor]: { x: 60, y: 380, width: 100, height: 70 },
+};
+
+// Room connections for drawing paths
+export const RoomConnections: [Location, Location][] = [
+  [Location.Cafeteria, Location.Admin],
+  [Location.Cafeteria, Location.MedBay],
+  [Location.Cafeteria, Location.UpperEngine],
+  [Location.Admin, Location.Storage],
+  [Location.Storage, Location.Electrical],
+  [Location.Storage, Location.LowerEngine],
+  [Location.Electrical, Location.LowerEngine],
+  [Location.MedBay, Location.UpperEngine],
+  [Location.MedBay, Location.Security],
+  [Location.UpperEngine, Location.Reactor],
+  [Location.LowerEngine, Location.Security],
+  [Location.Security, Location.Reactor],
+];

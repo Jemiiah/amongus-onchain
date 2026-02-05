@@ -1,0 +1,1 @@
+{"version":3,"file":"index.d.ts","sourceRoot":"","sources":["../../src/abi/index.ts"],"names":[],"mappings":"AAAA,OAAO,qBAAqB,MAAM,2BAA2B,CAAC;AAC9D,OAAO,cAAc,MAAM,oBAAoB,CAAC;AAChD,OAAO,aAAa,MAAM,mBAAmB,CAAC;AAC9C,OAAO,gBAAgB,MAAM,sBAAsB,CAAC;AAEpD,OAAO,EACL,qBAAqB,EACrB,cAAc,EACd,aAAa,EACb,gBAAgB,GACjB,CAAC"}
