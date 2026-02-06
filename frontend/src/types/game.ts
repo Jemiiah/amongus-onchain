@@ -153,3 +153,47 @@ export const RoomConnections: [Location, Location][] = [
   [Location.LowerEngine, Location.Security],
   [Location.Security, Location.Reactor],
 ];
+
+// ============ Lobby Types ============
+
+export enum RoomStatus {
+  Open = 0,
+  Full = 1,
+  InGame = 2,
+  Closed = 3,
+}
+
+export const RoomStatusNames: Record<RoomStatus, string> = {
+  [RoomStatus.Open]: "Open",
+  [RoomStatus.Full]: "Full",
+  [RoomStatus.InGame]: "In Game",
+  [RoomStatus.Closed]: "Closed",
+};
+
+export interface Agent {
+  address: `0x${string}`;
+  name: string;
+  balance: bigint;
+  isRegistered: boolean;
+  colorId: number;
+  gamesPlayed: number;
+  wins: number;
+}
+
+export interface GameRoom {
+  roomId: number;
+  creator: `0x${string}`;
+  players: Agent[];
+  wagerAmount: bigint;
+  maxPlayers: number;
+  status: RoomStatus;
+  createdAt: number;
+}
+
+export interface LobbyState {
+  rooms: GameRoom[];
+  currentAgent: Agent | null;
+  canCreateRoom: boolean;
+  roomCreator: `0x${string}` | null;
+  registeredAgents: Agent[];
+}
