@@ -280,17 +280,24 @@ export default function Home() {
   useEffect(() => {
     if (view !== "game") return;
 
-    // Room connections for valid movement (agents can only move to adjacent rooms)
+    // Room connections for valid movement - matches The Skeld layout
+    // Upper Engine -- MedBay -- Cafeteria
+    //      |                        |
+    //   Reactor                   Admin
+    //      |                        |
+    //   Security                  Storage
+    //      |                        |
+    // Lower Engine -- Electrical ---+
     const ADJACENT_ROOMS: Record<Location, Location[]> = {
+      [Location.UpperEngine]: [Location.MedBay, Location.Reactor],
+      [Location.MedBay]: [Location.UpperEngine, Location.Cafeteria],
       [Location.Cafeteria]: [Location.MedBay, Location.Admin],
-      [Location.MedBay]: [Location.Cafeteria, Location.UpperEngine, Location.Security],
-      [Location.UpperEngine]: [Location.MedBay, Location.Security],
-      [Location.Security]: [Location.UpperEngine, Location.LowerEngine, Location.Electrical, Location.MedBay],
-      [Location.LowerEngine]: [Location.Security, Location.Electrical, Location.Reactor],
-      [Location.Electrical]: [Location.Security, Location.LowerEngine, Location.Storage],
-      [Location.Storage]: [Location.Electrical, Location.Admin],
+      [Location.Reactor]: [Location.UpperEngine, Location.Security],
       [Location.Admin]: [Location.Cafeteria, Location.Storage],
-      [Location.Reactor]: [Location.LowerEngine],
+      [Location.Security]: [Location.Reactor, Location.LowerEngine],
+      [Location.Storage]: [Location.Admin, Location.Electrical],
+      [Location.LowerEngine]: [Location.Security, Location.Electrical],
+      [Location.Electrical]: [Location.LowerEngine, Location.Storage],
     };
 
     // Agent movement - move through corridors (one room at a time)

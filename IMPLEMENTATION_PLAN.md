@@ -253,7 +253,7 @@ frontend/
 
 ## Current State
 
-### Completed
+### Completed (Phase 1)
 - [x] Basic map with 9 rooms and corridors
 - [x] Player sprites and movement visualization
 - [x] Task bar and progress display
@@ -262,27 +262,38 @@ frontend/
 - [x] Ejection animation
 - [x] Game end screen
 - [x] Mock player data structure
-- [x] Smart contract foundations
-- [x] GameLobby.sol smart contract (room creation/joining)
-- [x] LobbyScreen.tsx frontend component
+- [x] Smart contract foundations (GameLobby.sol)
+- [x] LobbyScreen.tsx - Spectator mode UI
 - [x] Lobby types (Agent, GameRoom, RoomStatus)
-- [x] Room creation logic (only highest token balance agent can create)
-- [x] Room joining/leaving flow
-- [x] Game start from lobby (converts room players to game players)
+- [x] Room creation logic (highest token balance agent creates)
+- [x] Autonomous room joining flow
+- [x] Game start with 6-8 agents
+- [x] Autonomous agent movement through corridors
+- [x] Autonomous task completion (crewmates)
+- [x] Smart impostor AI (checks for witnesses in adjacent rooms)
+- [x] Autonomous body discovery and reporting
+- [x] Autonomous voting and ejection
+- [x] Full spectator mode (user watches, agents play)
 
-### In Progress
-- [ ] Agent autonomous decision making
-- [ ] ERC-8004 identity integration
-- [ ] Connect lobby to actual blockchain (currently mock data)
+### Phase 2: Blockchain Integration (Next)
+- [ ] Deploy GameLobby.sol to Monad testnet
+- [ ] Connect frontend to actual smart contracts
+- [ ] ERC-8004 agent identity registration
+- [ ] Real token balance checks for room creation
+- [ ] On-chain wager deposits and payouts
 
-### TODO
-- [ ] Commit-reveal action system
-- [ ] Real blockchain integration
-- [ ] Discussion/voting logic
-- [ ] Sabotage system
-- [ ] Vent network
-- [ ] Security cameras
+### Phase 3: Commit-Reveal System
+- [ ] Implement commit-reveal for hidden actions
+- [ ] On-chain action validation
+- [ ] Prevent cheating/front-running
+
+### Phase 4: Advanced Features
+- [ ] Sabotage system (doors, lights, O2, reactor)
+- [ ] Vent network (impostor fast travel)
+- [ ] Security cameras (monitoring)
 - [ ] Ghost mode for dead players
+- [ ] Emergency meeting button
+- [ ] Kill cooldown timer
 
 ---
 
@@ -326,8 +337,30 @@ const AGENT_CONFIG = {
 
 ## Next Steps
 
-1. **Implement GameLobby.sol** - Smart contract for room management
-2. **Create LobbyScreen component** - UI for room list and creation
-3. **Update page.tsx** - Add lobby view before game view
-4. **Implement LobbyManager.ts** - Agent logic for room interactions
-5. **Connect to Monad testnet** - Deploy contracts and test
+### Immediate (Phase 2 - Blockchain Integration)
+1. **Deploy contracts to Monad testnet**
+   - Deploy GameLobby.sol
+   - Deploy AmongUsGame.sol
+   - Deploy WagerVault.sol
+
+2. **ERC-8004 Agent Registration**
+   - Integrate with Identity Registry (0x8004A169FB4a3325136EB29fA0ceB6D2e539a432)
+   - Agents mint identity NFT on registration
+   - Store agent metadata (name, strategy, wallet)
+
+3. **Connect Frontend to Blockchain**
+   - Replace mock data with contract reads
+   - Implement wallet connection
+   - Real token balance checks
+   - Transaction signing for actions
+
+4. **Agent Backend Service**
+   - Create agent runner service (TypeScript)
+   - Implement strategy decision making
+   - Auto-sign transactions for agent wallets
+   - Connect to game contracts
+
+### Future (Phase 3+)
+5. **Commit-reveal action system** - Hidden moves
+6. **Sabotage mechanics** - Impostor abilities
+7. **Reputation tracking** - ERC-8004 feedback after games

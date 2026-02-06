@@ -211,6 +211,15 @@ function HazardStripes({ x, y, width, height, direction = 'horizontal' }: { x: n
 }
 
 // Room configurations - MUCH LARGER layout with proper spacing
+// The Skeld Layout:
+//   Upper Engine ---- MedBay ---- Cafeteria
+//        |                            |
+//     Reactor                       Admin
+//        |                            |
+//    Security                      Storage
+//        |                            |
+//   Lower Engine -- Electrical -------+
+//
 const ROOMS: Record<Location, {
   x: number;
   y: number;
@@ -219,230 +228,244 @@ const ROOMS: Record<Location, {
   color: string;
   floorColor: string;
   name: string;
-  // Walking points inside the room
   entryPoints: { [key: string]: { x: number; y: number } };
   center: { x: number; y: number };
 }> = {
-  [Location.Cafeteria]: {
-    x: 1900, y: 100,
-    width: 900, height: 650,
-    color: "#4a5568", floorColor: "#5a6578",
-    name: "CAFETERIA",
-    center: { x: 2350, y: 450 },
+  // === TOP ROW ===
+  [Location.UpperEngine]: {
+    x: 100, y: 100,
+    width: 650, height: 550,
+    color: "#5a3a3a", floorColor: "#6a4a4a",
+    name: "UPPER ENGINE",
+    center: { x: 425, y: 400 },
     entryPoints: {
-      left: { x: 1900, y: 450 },
-      bottom: { x: 2350, y: 750 },
+      right: { x: 750, y: 400 },
+      bottom: { x: 425, y: 650 },
     },
   },
   [Location.MedBay]: {
-    x: 900, y: 150,
-    width: 700, height: 550,
+    x: 950, y: 100,
+    width: 650, height: 550,
     color: "#3a5a4a", floorColor: "#4a6a5a",
     name: "MEDBAY",
-    center: { x: 1250, y: 450 },
+    center: { x: 1275, y: 400 },
     entryPoints: {
-      right: { x: 1600, y: 450 },
-      left: { x: 900, y: 450 },
-      bottom: { x: 1250, y: 700 },
+      left: { x: 950, y: 400 },
+      right: { x: 1600, y: 400 },
     },
   },
-  [Location.UpperEngine]: {
-    x: 100, y: 100,
-    width: 650, height: 580,
-    color: "#5a3a3a", floorColor: "#6a4a4a",
-    name: "UPPER ENGINE",
-    center: { x: 425, y: 410 },
+  [Location.Cafeteria]: {
+    x: 1800, y: 100,
+    width: 900, height: 550,
+    color: "#4a5568", floorColor: "#5a6578",
+    name: "CAFETERIA",
+    center: { x: 2250, y: 400 },
     entryPoints: {
-      right: { x: 750, y: 410 },
-      bottom: { x: 425, y: 680 },
+      left: { x: 1800, y: 400 },
+      bottom: { x: 2250, y: 650 },
     },
   },
-  [Location.Security]: {
-    x: 100, y: 880,
-    width: 600, height: 520,
-    color: "#3a3a5a", floorColor: "#4a4a6a",
-    name: "SECURITY",
-    center: { x: 400, y: 1160 },
-    entryPoints: {
-      top: { x: 400, y: 880 },
-      bottom: { x: 400, y: 1400 },
-      right: { x: 700, y: 1160 },
-    },
-  },
-  [Location.LowerEngine]: {
-    x: 100, y: 1620,
-    width: 650, height: 580,
-    color: "#5a3a3a", floorColor: "#6a4a4a",
-    name: "LOWER ENGINE",
-    center: { x: 425, y: 1930 },
-    entryPoints: {
-      top: { x: 425, y: 1620 },
-      right: { x: 750, y: 1930 },
-      bottom: { x: 425, y: 2200 },
-    },
-  },
-  [Location.Electrical]: {
-    x: 950, y: 1550,
-    width: 650, height: 550,
-    color: "#3a4a5a", floorColor: "#4a5a6a",
-    name: "ELECTRICAL",
-    center: { x: 1275, y: 1850 },
-    entryPoints: {
-      left: { x: 950, y: 1850 },
-      right: { x: 1600, y: 1850 },
-      top: { x: 1275, y: 1550 },
-    },
-  },
-  [Location.Storage]: {
-    x: 1800, y: 1700,
-    width: 750, height: 620,
+  // === SECOND ROW ===
+  [Location.Reactor]: {
+    x: 100, y: 850,
+    width: 650, height: 500,
     color: "#5a4a3a", floorColor: "#6a5a4a",
-    name: "STORAGE",
-    center: { x: 2175, y: 2030 },
+    name: "REACTOR",
+    center: { x: 425, y: 1120 },
     entryPoints: {
-      left: { x: 1800, y: 2030 },
-      top: { x: 2175, y: 1700 },
+      top: { x: 425, y: 850 },
+      bottom: { x: 425, y: 1350 },
     },
   },
   [Location.Admin]: {
-    x: 2100, y: 920,
-    width: 680, height: 550,
+    x: 2000, y: 850,
+    width: 700, height: 500,
     color: "#4a5568", floorColor: "#5a6578",
     name: "ADMIN",
-    center: { x: 2440, y: 1220 },
+    center: { x: 2350, y: 1120 },
     entryPoints: {
-      top: { x: 2440, y: 920 },
-      bottom: { x: 2440, y: 1470 },
+      top: { x: 2350, y: 850 },
+      bottom: { x: 2350, y: 1350 },
     },
   },
-  [Location.Reactor]: {
-    x: 100, y: 2420,
-    width: 700, height: 500,
-    color: "#5a4a3a", floorColor: "#6a5a4a",
-    name: "REACTOR",
-    center: { x: 450, y: 2690 },
+  // === THIRD ROW ===
+  [Location.Security]: {
+    x: 100, y: 1550,
+    width: 650, height: 500,
+    color: "#3a3a5a", floorColor: "#4a4a6a",
+    name: "SECURITY",
+    center: { x: 425, y: 1820 },
     entryPoints: {
-      top: { x: 450, y: 2420 },
+      top: { x: 425, y: 1550 },
+      bottom: { x: 425, y: 2050 },
+    },
+  },
+  [Location.Storage]: {
+    x: 1800, y: 1550,
+    width: 900, height: 550,
+    color: "#5a4a3a", floorColor: "#6a5a4a",
+    name: "STORAGE",
+    center: { x: 2250, y: 1850 },
+    entryPoints: {
+      top: { x: 2250, y: 1550 },
+      left: { x: 1800, y: 1850 },
+    },
+  },
+  // === BOTTOM ROW ===
+  [Location.LowerEngine]: {
+    x: 100, y: 2300,
+    width: 650, height: 550,
+    color: "#5a3a3a", floorColor: "#6a4a4a",
+    name: "LOWER ENGINE",
+    center: { x: 425, y: 2600 },
+    entryPoints: {
+      top: { x: 425, y: 2300 },
+      right: { x: 750, y: 2600 },
+    },
+  },
+  [Location.Electrical]: {
+    x: 950, y: 2300,
+    width: 650, height: 550,
+    color: "#3a4a5a", floorColor: "#4a5a6a",
+    name: "ELECTRICAL",
+    center: { x: 1275, y: 2600 },
+    entryPoints: {
+      left: { x: 950, y: 2600 },
+      right: { x: 1600, y: 2600 },
     },
   },
 };
 
-// Corridor definitions - properly connected to room edges with good spacing
+// Corridor definitions - matches The Skeld layout
 const CORRIDORS: { x: number; y: number; width: number; height: number; direction: 'horizontal' | 'vertical' }[] = [
-  // Upper Engine (right edge x=750) to MedBay (left edge x=900)
-  { x: 750, y: 360, width: 150, height: 120, direction: 'horizontal' },
+  // === TOP HORIZONTAL CORRIDOR ===
+  // Upper Engine (right edge x=750) to MedBay (left edge x=950)
+  { x: 750, y: 350, width: 200, height: 120, direction: 'horizontal' },
+  // MedBay (right edge x=1600) to Cafeteria (left edge x=1800)
+  { x: 1600, y: 350, width: 200, height: 120, direction: 'horizontal' },
 
-  // MedBay (right edge x=1600) to Cafeteria (left edge x=1900)
-  { x: 1600, y: 400, width: 300, height: 120, direction: 'horizontal' },
+  // === LEFT VERTICAL CORRIDOR (Engine Column) ===
+  // Upper Engine (bottom y=650) to Reactor (top y=850)
+  { x: 370, y: 650, width: 120, height: 200, direction: 'vertical' },
+  // Reactor (bottom y=1350) to Security (top y=1550)
+  { x: 370, y: 1350, width: 120, height: 200, direction: 'vertical' },
+  // Security (bottom y=2050) to Lower Engine (top y=2300)
+  { x: 370, y: 2050, width: 120, height: 250, direction: 'vertical' },
 
-  // Upper Engine (bottom y=680) to Security (top y=880)
-  { x: 370, y: 680, width: 120, height: 200, direction: 'vertical' },
+  // === RIGHT VERTICAL CORRIDOR ===
+  // Cafeteria (bottom y=650) to Admin (top y=850)
+  { x: 2200, y: 650, width: 120, height: 200, direction: 'vertical' },
+  // Admin (bottom y=1350) to Storage (top y=1550)
+  { x: 2200, y: 1350, width: 120, height: 200, direction: 'vertical' },
 
-  // Security (bottom y=1400) to Lower Engine (top y=1620)
-  { x: 370, y: 1400, width: 120, height: 220, direction: 'vertical' },
-
-  // Lower Engine (bottom y=2200) to Reactor (top y=2420)
-  { x: 400, y: 2200, width: 120, height: 220, direction: 'vertical' },
-
-  // Security (right edge x=700) to Electrical area - horizontal then vertical
-  { x: 700, y: 1110, width: 250, height: 120, direction: 'horizontal' },
-  // Vertical connector down to Electrical (top y=1550)
-  { x: 880, y: 1230, width: 120, height: 320, direction: 'vertical' },
-
+  // === BOTTOM HORIZONTAL CORRIDOR ===
   // Lower Engine (right edge x=750) to Electrical (left edge x=950)
-  { x: 750, y: 1880, width: 200, height: 120, direction: 'horizontal' },
-
+  { x: 750, y: 2550, width: 200, height: 120, direction: 'horizontal' },
   // Electrical (right edge x=1600) to Storage (left edge x=1800)
-  { x: 1600, y: 1800, width: 200, height: 120, direction: 'horizontal' },
-
-  // Cafeteria (bottom y=750) to Admin (top y=920)
-  { x: 2390, y: 750, width: 120, height: 170, direction: 'vertical' },
-
-  // Admin (bottom y=1470) to Storage (top y=1700)
-  { x: 2390, y: 1470, width: 120, height: 230, direction: 'vertical' },
-
-  // MedBay (bottom y=700) connection path
-  { x: 1200, y: 700, width: 120, height: 180, direction: 'vertical' },
+  { x: 1600, y: 2550, width: 200, height: 120, direction: 'horizontal' },
+  // Connect bottom corridor to Storage (going up)
+  { x: 1750, y: 2100, width: 120, height: 500, direction: 'vertical' },
 ];
 
-// Vent locations on the map - updated for new larger positions
+// Vent locations on the map - positioned for The Skeld layout
 const VENTS = [
-  { x: 650, y: 550 },   // Near Upper Engine
-  { x: 1400, y: 550 },  // Near MedBay
-  { x: 550, y: 1250 },  // Security
-  { x: 1150, y: 1750 }, // Electrical
-  { x: 2050, y: 1950 }, // Storage
-  { x: 2300, y: 1150 }, // Admin
+  { x: 600, y: 500 },   // Upper Engine
+  { x: 1400, y: 500 },  // MedBay
+  { x: 600, y: 1200 },  // Reactor
+  { x: 600, y: 1900 },  // Security
+  { x: 600, y: 2700 },  // Lower Engine
+  { x: 1400, y: 2700 }, // Electrical
+  { x: 2400, y: 1200 }, // Admin
+  { x: 2400, y: 1950 }, // Storage
 ];
 
-// Wall lights for ambiance - updated positions
+// Wall lights for ambiance - positioned for The Skeld layout
 const WALL_LIGHTS = [
-  { x: 770, y: 300, color: '#3b82f6' },
-  { x: 880, y: 300, color: '#3b82f6' },
-  { x: 1880, y: 200, color: '#22c55e' },
-  { x: 2600, y: 200, color: '#22c55e' },
-  { x: 80, y: 780, color: '#ef4444' },
-  { x: 80, y: 1500, color: '#ef4444' },
-  { x: 80, y: 2300, color: '#f59e0b' },
-  { x: 930, y: 1530, color: '#3b82f6' },
-  { x: 1780, y: 1680, color: '#a855f7' },
-  { x: 2800, y: 900, color: '#22c55e' },
-  { x: 2800, y: 1450, color: '#22c55e' },
+  // Top row
+  { x: 80, y: 200, color: '#ef4444' },    // Upper Engine
+  { x: 930, y: 200, color: '#22c55e' },   // MedBay
+  { x: 1780, y: 200, color: '#3b82f6' },  // Cafeteria
+  { x: 2680, y: 200, color: '#3b82f6' },  // Cafeteria right
+  // Second row
+  { x: 80, y: 950, color: '#f59e0b' },    // Reactor
+  { x: 2680, y: 950, color: '#22c55e' },  // Admin
+  // Third row
+  { x: 80, y: 1650, color: '#a855f7' },   // Security
+  { x: 2680, y: 1650, color: '#a855f7' }, // Storage
+  // Bottom row
+  { x: 80, y: 2400, color: '#ef4444' },   // Lower Engine
+  { x: 930, y: 2400, color: '#3b82f6' },  // Electrical
 ];
 
-// Space windows on the hull - updated positions for larger map
+// Space windows on the hull - positioned for The Skeld layout
 const SPACE_WINDOWS = [
-  { x: 30, y: 300, width: 55, height: 80 },
-  { x: 30, y: 1050, width: 55, height: 80 },
-  { x: 30, y: 1800, width: 55, height: 80 },
-  { x: 30, y: 2600, width: 55, height: 80 },
-  { x: 2900, y: 250, width: 55, height: 80 },
-  { x: 2900, y: 800, width: 55, height: 80 },
-  { x: 2900, y: 1350, width: 55, height: 80 },
-  { x: 2900, y: 1900, width: 55, height: 80 },
+  // Left side
+  { x: 30, y: 250, width: 55, height: 80 },   // Upper Engine
+  { x: 30, y: 1000, width: 55, height: 80 },  // Reactor
+  { x: 30, y: 1700, width: 55, height: 80 },  // Security
+  { x: 30, y: 2450, width: 55, height: 80 },  // Lower Engine
+  // Right side
+  { x: 2800, y: 250, width: 55, height: 80 },  // Cafeteria
+  { x: 2800, y: 1000, width: 55, height: 80 }, // Admin
+  { x: 2800, y: 1700, width: 55, height: 80 }, // Storage
 ];
 
-// Graph of connected rooms with corridor waypoints - updated for new larger layout
+// Graph of connected rooms with corridor waypoints - The Skeld layout
+// Connections match types/game.ts RoomConnections
 const ROOM_CONNECTIONS: Record<Location, { to: Location; path: { x: number; y: number }[] }[]> = {
-  [Location.Cafeteria]: [
-    { to: Location.MedBay, path: [{ x: 1900, y: 450 }, { x: 1750, y: 450 }, { x: 1600, y: 450 }] },
-    { to: Location.Admin, path: [{ x: 2440, y: 750 }, { x: 2440, y: 835 }, { x: 2440, y: 920 }] },
+  [Location.UpperEngine]: [
+    // Upper Engine → MedBay (horizontal right)
+    { to: Location.MedBay, path: [{ x: 750, y: 400 }, { x: 850, y: 400 }, { x: 950, y: 400 }] },
+    // Upper Engine → Reactor (vertical down)
+    { to: Location.Reactor, path: [{ x: 425, y: 650 }, { x: 425, y: 750 }, { x: 425, y: 850 }] },
   ],
   [Location.MedBay]: [
-    { to: Location.Cafeteria, path: [{ x: 1600, y: 450 }, { x: 1750, y: 450 }, { x: 1900, y: 450 }] },
-    { to: Location.UpperEngine, path: [{ x: 900, y: 450 }, { x: 825, y: 410 }, { x: 750, y: 410 }] },
-    { to: Location.Security, path: [{ x: 1250, y: 700 }, { x: 1250, y: 800 }, { x: 900, y: 880 }, { x: 700, y: 1160 }] },
+    // MedBay → Upper Engine (horizontal left)
+    { to: Location.UpperEngine, path: [{ x: 950, y: 400 }, { x: 850, y: 400 }, { x: 750, y: 400 }] },
+    // MedBay → Cafeteria (horizontal right)
+    { to: Location.Cafeteria, path: [{ x: 1600, y: 400 }, { x: 1700, y: 400 }, { x: 1800, y: 400 }] },
   ],
-  [Location.UpperEngine]: [
-    { to: Location.MedBay, path: [{ x: 750, y: 410 }, { x: 825, y: 410 }, { x: 900, y: 450 }] },
-    { to: Location.Security, path: [{ x: 425, y: 680 }, { x: 425, y: 780 }, { x: 400, y: 880 }] },
-  ],
-  [Location.Security]: [
-    { to: Location.UpperEngine, path: [{ x: 400, y: 880 }, { x: 425, y: 780 }, { x: 425, y: 680 }] },
-    { to: Location.LowerEngine, path: [{ x: 400, y: 1400 }, { x: 425, y: 1510 }, { x: 425, y: 1620 }] },
-    { to: Location.Electrical, path: [{ x: 700, y: 1160 }, { x: 880, y: 1300 }, { x: 950, y: 1550 }, { x: 950, y: 1850 }] },
-    { to: Location.MedBay, path: [{ x: 700, y: 1160 }, { x: 900, y: 880 }, { x: 1250, y: 800 }, { x: 1250, y: 700 }] },
-  ],
-  [Location.LowerEngine]: [
-    { to: Location.Security, path: [{ x: 425, y: 1620 }, { x: 425, y: 1510 }, { x: 400, y: 1400 }] },
-    { to: Location.Electrical, path: [{ x: 750, y: 1930 }, { x: 850, y: 1850 }, { x: 950, y: 1850 }] },
-    { to: Location.Reactor, path: [{ x: 425, y: 2200 }, { x: 450, y: 2310 }, { x: 450, y: 2420 }] },
-  ],
-  [Location.Electrical]: [
-    { to: Location.LowerEngine, path: [{ x: 950, y: 1850 }, { x: 850, y: 1850 }, { x: 750, y: 1930 }] },
-    { to: Location.Storage, path: [{ x: 1600, y: 1850 }, { x: 1700, y: 1920 }, { x: 1800, y: 2030 }] },
-    { to: Location.Security, path: [{ x: 950, y: 1850 }, { x: 950, y: 1550 }, { x: 880, y: 1300 }, { x: 700, y: 1160 }] },
-  ],
-  [Location.Storage]: [
-    { to: Location.Electrical, path: [{ x: 1800, y: 2030 }, { x: 1700, y: 1920 }, { x: 1600, y: 1850 }] },
-    { to: Location.Admin, path: [{ x: 2175, y: 1700 }, { x: 2440, y: 1585 }, { x: 2440, y: 1470 }] },
-  ],
-  [Location.Admin]: [
-    { to: Location.Cafeteria, path: [{ x: 2440, y: 920 }, { x: 2440, y: 835 }, { x: 2440, y: 750 }] },
-    { to: Location.Storage, path: [{ x: 2440, y: 1470 }, { x: 2440, y: 1585 }, { x: 2175, y: 1700 }] },
+  [Location.Cafeteria]: [
+    // Cafeteria → MedBay (horizontal left)
+    { to: Location.MedBay, path: [{ x: 1800, y: 400 }, { x: 1700, y: 400 }, { x: 1600, y: 400 }] },
+    // Cafeteria → Admin (vertical down)
+    { to: Location.Admin, path: [{ x: 2250, y: 650 }, { x: 2250, y: 750 }, { x: 2350, y: 850 }] },
   ],
   [Location.Reactor]: [
-    { to: Location.LowerEngine, path: [{ x: 450, y: 2420 }, { x: 450, y: 2310 }, { x: 425, y: 2200 }] },
+    // Reactor → Upper Engine (vertical up)
+    { to: Location.UpperEngine, path: [{ x: 425, y: 850 }, { x: 425, y: 750 }, { x: 425, y: 650 }] },
+    // Reactor → Security (vertical down)
+    { to: Location.Security, path: [{ x: 425, y: 1350 }, { x: 425, y: 1450 }, { x: 425, y: 1550 }] },
+  ],
+  [Location.Admin]: [
+    // Admin → Cafeteria (vertical up)
+    { to: Location.Cafeteria, path: [{ x: 2350, y: 850 }, { x: 2250, y: 750 }, { x: 2250, y: 650 }] },
+    // Admin → Storage (vertical down)
+    { to: Location.Storage, path: [{ x: 2350, y: 1350 }, { x: 2350, y: 1450 }, { x: 2250, y: 1550 }] },
+  ],
+  [Location.Security]: [
+    // Security → Reactor (vertical up)
+    { to: Location.Reactor, path: [{ x: 425, y: 1550 }, { x: 425, y: 1450 }, { x: 425, y: 1350 }] },
+    // Security → Lower Engine (vertical down)
+    { to: Location.LowerEngine, path: [{ x: 425, y: 2050 }, { x: 425, y: 2175 }, { x: 425, y: 2300 }] },
+  ],
+  [Location.Storage]: [
+    // Storage → Admin (vertical up)
+    { to: Location.Admin, path: [{ x: 2250, y: 1550 }, { x: 2350, y: 1450 }, { x: 2350, y: 1350 }] },
+    // Storage → Electrical (horizontal left, going down then left)
+    { to: Location.Electrical, path: [{ x: 1800, y: 1850 }, { x: 1750, y: 2200 }, { x: 1600, y: 2600 }] },
+  ],
+  [Location.LowerEngine]: [
+    // Lower Engine → Security (vertical up)
+    { to: Location.Security, path: [{ x: 425, y: 2300 }, { x: 425, y: 2175 }, { x: 425, y: 2050 }] },
+    // Lower Engine → Electrical (horizontal right)
+    { to: Location.Electrical, path: [{ x: 750, y: 2600 }, { x: 850, y: 2600 }, { x: 950, y: 2600 }] },
+  ],
+  [Location.Electrical]: [
+    // Electrical → Lower Engine (horizontal left)
+    { to: Location.LowerEngine, path: [{ x: 950, y: 2600 }, { x: 850, y: 2600 }, { x: 750, y: 2600 }] },
+    // Electrical → Storage (horizontal right, going up then right)
+    { to: Location.Storage, path: [{ x: 1600, y: 2600 }, { x: 1750, y: 2200 }, { x: 1800, y: 1850 }] },
   ],
 };
 

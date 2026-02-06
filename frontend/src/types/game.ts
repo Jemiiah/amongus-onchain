@@ -125,33 +125,47 @@ export const PlayerColors: Record<number, { name: string; hex: string; light: st
   11: { name: "Lime", hex: "#50EF39", light: "#8AFF6D" },
 };
 
-// Map layout coordinates for visualization
+// Map layout coordinates for visualization - The Skeld layout
+// Layout:
+//   Upper Engine ---- MedBay ---- Cafeteria
+//        |                            |
+//     Reactor                       Admin
+//        |                            |
+//    Security                      Storage
+//        |                            |
+//   Lower Engine -- Electrical -------+
+//
 export const MapLayout: Record<Location, { x: number; y: number; width: number; height: number }> = {
-  [Location.Cafeteria]: { x: 300, y: 50, width: 120, height: 80 },
-  [Location.Admin]: { x: 380, y: 170, width: 100, height: 70 },
-  [Location.Storage]: { x: 380, y: 280, width: 100, height: 70 },
-  [Location.Electrical]: { x: 260, y: 280, width: 100, height: 70 },
-  [Location.MedBay]: { x: 180, y: 170, width: 100, height: 70 },
-  [Location.UpperEngine]: { x: 60, y: 50, width: 100, height: 80 },
-  [Location.LowerEngine]: { x: 60, y: 280, width: 100, height: 70 },
-  [Location.Security]: { x: 60, y: 170, width: 100, height: 70 },
-  [Location.Reactor]: { x: 60, y: 380, width: 100, height: 70 },
+  // Top row
+  [Location.UpperEngine]: { x: 50, y: 40, width: 100, height: 80 },
+  [Location.MedBay]: { x: 200, y: 40, width: 100, height: 80 },
+  [Location.Cafeteria]: { x: 350, y: 40, width: 110, height: 80 },
+  // Second row
+  [Location.Reactor]: { x: 50, y: 155, width: 100, height: 70 },
+  [Location.Admin]: { x: 380, y: 155, width: 80, height: 70 },
+  // Third row
+  [Location.Security]: { x: 50, y: 260, width: 100, height: 70 },
+  [Location.Storage]: { x: 350, y: 260, width: 110, height: 80 },
+  // Bottom row
+  [Location.LowerEngine]: { x: 50, y: 365, width: 100, height: 70 },
+  [Location.Electrical]: { x: 200, y: 365, width: 100, height: 70 },
 };
 
-// Room connections for drawing paths
+// Room connections for drawing paths - matches The Skeld
 export const RoomConnections: [Location, Location][] = [
-  [Location.Cafeteria, Location.Admin],
-  [Location.Cafeteria, Location.MedBay],
-  [Location.Cafeteria, Location.UpperEngine],
-  [Location.Admin, Location.Storage],
-  [Location.Storage, Location.Electrical],
-  [Location.Storage, Location.LowerEngine],
-  [Location.Electrical, Location.LowerEngine],
-  [Location.MedBay, Location.UpperEngine],
-  [Location.MedBay, Location.Security],
+  // Top horizontal corridor
+  [Location.UpperEngine, Location.MedBay],
+  [Location.MedBay, Location.Cafeteria],
+  // Left vertical corridor (engine column)
   [Location.UpperEngine, Location.Reactor],
-  [Location.LowerEngine, Location.Security],
-  [Location.Security, Location.Reactor],
+  [Location.Reactor, Location.Security],
+  [Location.Security, Location.LowerEngine],
+  // Right vertical corridor
+  [Location.Cafeteria, Location.Admin],
+  [Location.Admin, Location.Storage],
+  // Bottom horizontal corridor
+  [Location.LowerEngine, Location.Electrical],
+  [Location.Electrical, Location.Storage],
 ];
 
 // ============ Lobby Types ============
