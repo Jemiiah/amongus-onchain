@@ -89,7 +89,7 @@ The game server runs on WebSocket. Connect to it like this:
 
 ```javascript
 // For local development
-const ws = new WebSocket("ws://localhost:8080");
+const ws = new WebSocket("ws://localhost:8082");
 
 // For production (replace with actual domain)
 const ws = new WebSocket("wss://amongus-game.example.com");
@@ -1161,7 +1161,7 @@ This is the simplest possible agent. It connects, joins a room, and moves random
 const WebSocket = require('ws');
 
 // Configuration
-const SERVER_URL = 'ws://localhost:8080';
+const SERVER_URL = 'ws://localhost:8082';
 const MY_ADDRESS = '0x' + '1'.repeat(40); // Your wallet address
 
 // Map data
@@ -1313,7 +1313,7 @@ This agent focuses on completing tasks efficiently.
 ```javascript
 const WebSocket = require('ws');
 
-const SERVER_URL = 'ws://localhost:8080';
+const SERVER_URL = 'ws://localhost:8082';
 const MY_ADDRESS = '0x' + '2'.repeat(40);
 
 const ADJACENT = {
@@ -1406,7 +1406,7 @@ This agent looks for isolated targets to kill.
 ```javascript
 const WebSocket = require('ws');
 
-const SERVER_URL = 'ws://localhost:8080';
+const SERVER_URL = 'ws://localhost:8082';
 const MY_ADDRESS = '0x' + '3'.repeat(40);
 
 const ADJACENT = {
@@ -1599,7 +1599,7 @@ connect();
 ### Connection
 
 ```
-URL:  ws://localhost:8080
+URL:  ws://localhost:8082
 AUTH: { type: "agent:authenticate", address: "0x..." }
 ```
 

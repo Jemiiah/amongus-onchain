@@ -8,7 +8,7 @@ const roomId = args[0]; // Optional: join specific room, otherwise wait for room
 const agentCount = parseInt(args[1] || "6", 10);
 const impostorCount = parseInt(args[2] || "1", 10);
 
-const serverUrl = process.env.WS_URL || "ws://localhost:8080";
+const serverUrl = process.env.WS_URL || "ws://localhost:8082";
 
 logger.info(`Starting agent simulation`);
 logger.info(`  Server: ${serverUrl}`);

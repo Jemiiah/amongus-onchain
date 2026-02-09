@@ -212,6 +212,15 @@ export class AgentSimulator {
    * Connect all agents to the room
    */
   private async joinRoomWithAgents(roomId: string): Promise<void> {
+    // Have control WS join as spectator to receive room updates
+    if (this.controlWs && this.controlWs.readyState === WebSocket.OPEN) {
+      this.controlWs.send(JSON.stringify({
+        type: "client:join_room",
+        roomId,
+        asSpectator: true,
+      }));
+    }
+
     for (const agent of this.agents) {
       await this.connectAgent(agent, roomId);
       // Small delay between connections

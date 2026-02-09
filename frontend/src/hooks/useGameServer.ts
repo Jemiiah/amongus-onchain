@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Player, DeadBody, Location, Role, GameLog, GamePhase } from "@/types/game";
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8080";
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8082";
 
 interface RoomState {
   roomId: string;

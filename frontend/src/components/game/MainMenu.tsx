@@ -98,7 +98,7 @@ export function MainMenu({ onPlay, isConnected, error }: MainMenuProps) {
 
           {!isConnected && (
             <p className="text-gray-500 text-xs text-center mt-2 max-w-sm">
-              Make sure the WebSocket server is running at ws://localhost:8080
+              Make sure the WebSocket server is running at ws://localhost:8082
             </p>
           )}
         </motion.div>

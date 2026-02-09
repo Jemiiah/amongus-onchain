@@ -2,7 +2,7 @@ import "dotenv/config";
 import { WebSocketRelayServer } from "./WebSocketServer.js";
 import { logger } from "./logger.js";
 
-const PORT = parseInt(process.env.WS_PORT || "8080", 10);
+const PORT = parseInt(process.env.WS_PORT || "8082", 10);
 const HOST = process.env.WS_HOST || "0.0.0.0";
 
 const server = new WebSocketRelayServer({ port: PORT, host: HOST });
