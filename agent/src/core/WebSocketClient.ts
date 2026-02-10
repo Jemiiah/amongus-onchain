@@ -1,4 +1,4 @@
-import * as WebSocket from "ws";
+import WebSocket from "ws";
 import type { Address } from "viem";
 import * as winston from "winston";
 import {
@@ -24,6 +24,19 @@ export interface AgentJoinGameMessage {
 export interface AgentLeaveGameMessage {
   type: "agent:leave_game";
   gameId: string;
+}
+
+// New relay server protocol messages
+export interface ClientJoinRoomMessage {
+  type: "client:join_room";
+  roomId: string;
+  colorId?: number;
+  asSpectator?: boolean;
+}
+
+export interface ClientLeaveRoomMessage {
+  type: "client:leave_room";
+  roomId: string;
 }
 
 export interface AgentPositionUpdateMessage {
@@ -84,7 +97,9 @@ type AgentMessage =
   | AgentPhaseChangeMessage
   | AgentKillMessage
   | AgentVoteMessage
-  | AgentTaskCompleteMessage;
+  | AgentTaskCompleteMessage
+  | ClientJoinRoomMessage
+  | ClientLeaveRoomMessage;
 
 // Server message types (for receiving)
 export interface ServerWelcomeMessage {
@@ -298,6 +313,35 @@ export class WebSocketClient {
         gameId: this.currentGameId,
       });
       this.logger.info(`Left game room: ${this.currentGameId}`);
+      this.currentGameId = null;
+    }
+  }
+
+  /**
+   * Join a room using the relay server protocol
+   * Use this for WebSocket relay server rooms (not on-chain games)
+   */
+  joinRoom(roomId: string, colorId?: number): void {
+    this.currentGameId = roomId;
+    this.send({
+      type: "client:join_room",
+      roomId,
+      colorId,
+      asSpectator: false,
+    });
+    this.logger.info(`Joining room: ${roomId}`);
+  }
+
+  /**
+   * Leave a room using the relay server protocol
+   */
+  leaveRoom(): void {
+    if (this.currentGameId) {
+      this.send({
+        type: "client:leave_room",
+        roomId: this.currentGameId,
+      });
+      this.logger.info(`Left room: ${this.currentGameId}`);
       this.currentGameId = null;
     }
   }
