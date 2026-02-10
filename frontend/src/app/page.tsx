@@ -24,7 +24,9 @@ import {
   Role,
   PlayerColors,
 } from "@/types/game";
-import { useGameServer } from "@/hooks/useGameServer";
+import { useGameServer, type RoomState } from "@/hooks/useGameServer";
+import { useServerData } from "@/hooks/useServerData";
+import type { RoomInfo, ServerStats } from "@/lib/api";
 
 type GameView = "menu" | "lobby" | "game" | "voting" | "end";
 
@@ -39,14 +41,19 @@ export default function Home() {
   const [gameWon, setGameWon] = useState(true);
   const [spotlightedPlayer, setSpotlightedPlayer] = useState<`0x${string}` | null>(null);
 
-  // WebSocket connection - the ONLY source of truth
+  // HTTP API for menu/lobby data (rooms, stats, leaderboard)
+  const {
+    rooms: httpRooms,
+    stats: httpStats,
+    leaderboard: httpLeaderboard,
+    error: httpError,
+  } = useServerData(5000); // Refresh every 5 seconds
+
+  // WebSocket for real-time gameplay
   const {
     isConnected,
-    error,
-    rooms,
+    error: wsError,
     currentRoom,
-    stats,
-    leaderboard,
     players,
     deadBodies,
     logs,
@@ -56,6 +63,12 @@ export default function Home() {
     joinRoom,
     leaveRoom,
   } = useGameServer();
+
+  // Use HTTP data for menu, WebSocket for gameplay
+  const rooms = httpRooms;
+  const stats = httpStats;
+  const leaderboard = httpLeaderboard;
+  const error = wsError || httpError;
 
   // Current player (first player for spectator view)
   const currentPlayer = players[0]?.address;
@@ -312,35 +325,14 @@ export default function Home() {
   );
 }
 
-// Lobby View Component - shows rooms from WebSocket server
+// Lobby View Component - shows rooms from HTTP API
 interface LobbyViewProps {
   isConnected: boolean;
-  rooms: Array<{
-    roomId: string;
-    players: Array<{
-      address: string;
-      colorId: number;
-      location: number;
-      isAlive: boolean;
-      tasksCompleted: number;
-      totalTasks: number;
-      hasVoted: boolean;
-    }>;
-    spectators: string[];
-    maxPlayers: number;
-    impostorCount: number;
-    phase: "lobby" | "playing" | "ended";
-    createdAt: number;
-  }>;
-  currentRoom: LobbyViewProps["rooms"][0] | null;
+  rooms: RoomInfo[];
+  currentRoom: RoomState | null;
   players: Player[];
   logs: GameLog[];
-  stats: {
-    connections: { total: number; agents: number; spectators: number };
-    rooms: { total: number; maxRooms: number; lobby: number; playing: number; totalPlayers: number };
-    limits: { maxRooms: number; maxPlayersPerRoom: number; minPlayersToStart: number; fillWaitDuration: number; cooldownDuration: number };
-    slots: Array<{ id: number; state: "active" | "cooldown" | "empty"; roomId: string | null; cooldownEndTime: number | null; cooldownRemaining: number | null }>;
-  } | null;
+  stats: ServerStats | null;
   onJoinRoom: (roomId: string) => void;
   onBack: () => void;
 }

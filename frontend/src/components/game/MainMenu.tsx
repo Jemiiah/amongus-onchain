@@ -7,68 +7,13 @@ import { SpaceBackground } from "./SpaceBackground";
 import { AmongUsSprite } from "./AmongUsSprite";
 import { ConnectButton } from "../wallet/ConnectButton";
 import { usePrivyEnabled } from "@/components/layout/Providers";
-
-interface RoomState {
-  roomId: string;
-  players: Array<{
-    address: string;
-    colorId: number;
-    isAlive: boolean;
-  }>;
-  spectators: string[];
-  maxPlayers: number;
-  phase: "lobby" | "playing" | "ended";
-}
-
-interface RoomSlotInfo {
-  id: number;
-  state: "active" | "cooldown" | "empty";
-  roomId: string | null;
-  cooldownEndTime: number | null;
-  cooldownRemaining: number | null;
-}
-
-interface ServerStats {
-  connections: {
-    total: number;
-    agents: number;
-    spectators: number;
-  };
-  rooms: {
-    total: number;
-    maxRooms: number;
-    lobby: number;
-    playing: number;
-    totalPlayers: number;
-  };
-  limits: {
-    maxRooms: number;
-    maxPlayersPerRoom: number;
-    minPlayersToStart: number;
-    fillWaitDuration: number;
-    cooldownDuration: number;
-  };
-  slots: RoomSlotInfo[];
-}
-
-interface AgentStats {
-  address: string;
-  name: string;
-  gamesPlayed: number;
-  wins: number;
-  losses: number;
-  kills: number;
-  tasksCompleted: number;
-  timesImpostor: number;
-  timesCrewmate: number;
-  lastSeen: number;
-}
+import type { RoomInfo, ServerStats, AgentStats } from "@/lib/api";
 
 interface MainMenuProps {
   onPlay: () => void;
   isConnected?: boolean;
   error?: string | null;
-  rooms?: RoomState[];
+  rooms?: RoomInfo[];
   stats?: ServerStats | null;
   leaderboard?: AgentStats[];
 }

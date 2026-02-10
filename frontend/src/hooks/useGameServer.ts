@@ -5,7 +5,7 @@ import { Player, DeadBody, Location, Role, GameLog, GamePhase } from "@/types/ga
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8082";
 
-interface RoomState {
+export interface RoomState {
   roomId: string;
   players: Array<{
     address: string;
