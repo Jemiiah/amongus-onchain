@@ -7,10 +7,17 @@ import type {
   PlayerState,
   Location,
   GamePhase,
+  DeadBodyState,
 } from "./types.js";
 import { createLogger } from "./logger.js";
+import { GameStateManager, WinConditionResult } from "./GameStateManager.js";
 
 const logger = createLogger("websocket-server");
+
+// Phase timing constants
+const DISCUSSION_DURATION = 30000; // 30 seconds
+const VOTING_DURATION = 30000; // 30 seconds
+const EJECTION_DURATION = 5000; // 5 seconds
 
 interface Client {
   id: string;
@@ -27,14 +34,27 @@ export interface WebSocketServerConfig {
   host?: string;
 }
 
+// Extended room state with game mechanics
+interface ExtendedRoomState extends RoomState {
+  impostors: Set<string>;
+  votes: Map<string, string | null>;
+  deadBodies: DeadBodyState[];
+  currentRound: number;
+  currentPhase: GamePhase;
+  phaseTimer: NodeJS.Timeout | null;
+}
+
 export class WebSocketRelayServer {
   private wss: WSServer | null = null;
   private clients: Map<string, Client> = new Map();
   private rooms: Map<string, RoomState> = new Map();
+  private extendedState: Map<string, ExtendedRoomState> = new Map();
+  private gameStateManager: GameStateManager;
   private config: WebSocketServerConfig;
 
   constructor(config: WebSocketServerConfig) {
     this.config = config;
+    this.gameStateManager = new GameStateManager();
   }
 
   start(): void {
@@ -162,6 +182,10 @@ export class WebSocketRelayServer {
 
       case "agent:phase_change":
         this.handlePhaseChange(client, message.gameId, message.phase, message.round, message.phaseEndTime);
+        break;
+
+      case "agent:report_body":
+        this.handleReportBody(client, message.gameId, message.reporter, message.bodyLocation, message.round);
         break;
 
       default:
@@ -303,12 +327,42 @@ export class WebSocketRelayServer {
     room.phase = "playing";
 
     // Assign impostors randomly
+    const impostorCount = Math.min(room.impostorCount, Math.floor(room.players.length / 3));
     const impostorIndices = new Set<number>();
-    while (impostorIndices.size < Math.min(room.impostorCount, Math.floor(room.players.length / 3))) {
+    while (impostorIndices.size < impostorCount) {
       impostorIndices.add(Math.floor(Math.random() * room.players.length));
     }
 
-    logger.info(`Game started in room ${roomId} with ${room.players.length} players`);
+    const impostorAddresses: string[] = [];
+    for (const idx of impostorIndices) {
+      impostorAddresses.push(room.players[idx].address);
+    }
+
+    // Initialize extended room state
+    const extended: ExtendedRoomState = {
+      ...room,
+      impostors: new Set(impostorAddresses.map(a => a.toLowerCase())),
+      votes: new Map(),
+      deadBodies: [],
+      currentRound: 1,
+      currentPhase: 2, // ActionCommit
+      phaseTimer: null,
+    };
+    this.extendedState.set(roomId, extended);
+
+    // Also register with GameStateManager
+    this.gameStateManager.getOrCreateGame(roomId);
+    this.gameStateManager.assignImpostors(roomId, impostorAddresses);
+
+    // Assign tasks to players (locations 1-8, excluding cafeteria which is 0)
+    for (const player of room.players) {
+      if (!extended.impostors.has(player.address.toLowerCase())) {
+        const taskLocations = this.generateTaskLocations(5);
+        this.gameStateManager.assignTasks(roomId, player.address, taskLocations);
+      }
+    }
+
+    logger.info(`Game started in room ${roomId} with ${room.players.length} players, ${impostorCount} impostors: ${impostorAddresses.join(", ")}`);
 
     // Broadcast game start (phase change)
     this.broadcastToRoom(roomId, {
@@ -324,6 +378,16 @@ export class WebSocketRelayServer {
     // Send room update
     this.broadcastToRoom(roomId, { type: "server:room_update", room });
     this.broadcastRoomList();
+  }
+
+  private generateTaskLocations(count: number): number[] {
+    const locations: number[] = [];
+    const available = [1, 2, 3, 4, 5, 6, 7, 8]; // All rooms except Cafeteria
+    for (let i = 0; i < count && available.length > 0; i++) {
+      const idx = Math.floor(Math.random() * available.length);
+      locations.push(available.splice(idx, 1)[0]);
+    }
+    return locations;
   }
 
   private handlePositionUpdate(client: Client, roomId: string, location: Location, round: number): void {
@@ -349,12 +413,22 @@ export class WebSocketRelayServer {
 
   private handleKill(client: Client, roomId: string, killer: string, victim: string, location: Location, round: number): void {
     const room = this.rooms.get(roomId);
-    if (!room) return;
+    const extended = this.extendedState.get(roomId);
+    if (!room || !extended) return;
 
     const victimPlayer = room.players.find((p) => p.address === victim);
     if (victimPlayer) {
       victimPlayer.isAlive = false;
     }
+
+    // Track dead body
+    const body: DeadBodyState = {
+      victim,
+      location,
+      round,
+      reported: false,
+    };
+    extended.deadBodies.push(body);
 
     this.broadcastToRoom(roomId, {
       type: "server:kill_occurred",
@@ -367,16 +441,28 @@ export class WebSocketRelayServer {
     });
 
     logger.info(`Kill in room ${roomId}: ${killer} killed ${victim}`);
+
+    // Check win condition
+    this.checkAndHandleWinCondition(roomId);
   }
 
   private handleVote(client: Client, roomId: string, voter: string, target: string | null, round: number): void {
     const room = this.rooms.get(roomId);
-    if (!room) return;
+    const extended = this.extendedState.get(roomId);
+    if (!room || !extended) return;
+
+    // Only accept votes during voting phase
+    if (extended.currentPhase !== 5) {
+      logger.warn(`Vote rejected: not in voting phase (current: ${extended.currentPhase})`);
+      return;
+    }
 
     const voterPlayer = room.players.find((p) => p.address === voter);
-    if (voterPlayer) {
-      voterPlayer.hasVoted = true;
-    }
+    if (!voterPlayer || !voterPlayer.isAlive) return;
+
+    // Record the vote
+    extended.votes.set(voter.toLowerCase(), target ? target.toLowerCase() : null);
+    voterPlayer.hasVoted = true;
 
     this.broadcastToRoom(roomId, {
       type: "server:vote_cast",
@@ -386,11 +472,30 @@ export class WebSocketRelayServer {
       round,
       timestamp: Date.now(),
     });
+
+    // Check if all votes are in
+    const alivePlayers = room.players.filter(p => p.isAlive);
+    const votedCount = alivePlayers.filter(p => p.hasVoted).length;
+
+    if (votedCount >= alivePlayers.length) {
+      // All votes are in, resolve immediately
+      if (extended.phaseTimer) {
+        clearTimeout(extended.phaseTimer);
+        extended.phaseTimer = null;
+      }
+      this.resolveVoting(roomId);
+    }
   }
 
-  private handleTaskComplete(client: Client, roomId: string, player: string, tasksCompleted: number, totalTasks: number): void {
+  private handleTaskComplete(client: Client, roomId: string, player: string, tasksCompleted: number, totalTasks: number, location?: Location): void {
     const room = this.rooms.get(roomId);
-    if (!room) return;
+    const extended = this.extendedState.get(roomId);
+    if (!room || !extended) return;
+
+    // Only allow during ActionCommit phase
+    if (extended.currentPhase !== 2) {
+      return;
+    }
 
     const playerState = room.players.find((p) => p.address === player);
     if (playerState) {
@@ -412,6 +517,11 @@ export class WebSocketRelayServer {
       totalProgress: progress,
       timestamp: Date.now(),
     });
+
+    // Check if all tasks are done
+    if (progress >= 100) {
+      this.endGame(roomId, true, "tasks");
+    }
   }
 
   private handlePhaseChange(client: Client, roomId: string, phase: GamePhase, round: number, phaseEndTime: number): void {
@@ -484,6 +594,310 @@ export class WebSocketRelayServer {
       }
     }
     return undefined;
+  }
+
+  // ============ BODY REPORTING ============
+
+  private handleReportBody(client: Client, roomId: string, reporter: string, bodyLocation: Location, round: number): void {
+    const room = this.rooms.get(roomId);
+    const extended = this.extendedState.get(roomId);
+    if (!room || !extended) return;
+
+    // Only allow during ActionCommit phase
+    if (extended.currentPhase !== 2) {
+      logger.warn(`Body report rejected: not in ActionCommit phase`);
+      return;
+    }
+
+    // Find unreported body at this location
+    const body = extended.deadBodies.find(
+      b => b.location === bodyLocation && !b.reported
+    );
+
+    if (!body) {
+      logger.warn(`No unreported body at location ${bodyLocation}`);
+      return;
+    }
+
+    // Mark body as reported
+    body.reported = true;
+
+    // Broadcast body reported
+    this.broadcastToRoom(roomId, {
+      type: "server:body_reported",
+      gameId: roomId,
+      reporter,
+      victim: body.victim,
+      location: bodyLocation,
+      round,
+      timestamp: Date.now(),
+    });
+
+    logger.info(`Body reported in room ${roomId}: ${reporter} found ${body.victim}`);
+
+    // Start discussion phase
+    this.startDiscussionPhase(roomId);
+  }
+
+  // ============ PHASE MANAGEMENT ============
+
+  private startDiscussionPhase(roomId: string): void {
+    const room = this.rooms.get(roomId);
+    const extended = this.extendedState.get(roomId);
+    if (!room || !extended) return;
+
+    // Clear any existing timer
+    if (extended.phaseTimer) {
+      clearTimeout(extended.phaseTimer);
+    }
+
+    const previousPhase = extended.currentPhase;
+    extended.currentPhase = 4; // Discussion
+
+    const phaseEndTime = Date.now() + DISCUSSION_DURATION;
+
+    this.broadcastToRoom(roomId, {
+      type: "server:phase_changed",
+      gameId: roomId,
+      phase: 4,
+      previousPhase,
+      round: extended.currentRound,
+      phaseEndTime,
+      timestamp: Date.now(),
+    });
+
+    logger.info(`Discussion phase started in room ${roomId}`);
+
+    // Set timer to transition to voting
+    extended.phaseTimer = setTimeout(() => {
+      this.startVotingPhase(roomId);
+    }, DISCUSSION_DURATION);
+  }
+
+  private startVotingPhase(roomId: string): void {
+    const room = this.rooms.get(roomId);
+    const extended = this.extendedState.get(roomId);
+    if (!room || !extended) return;
+
+    // Clear any existing timer
+    if (extended.phaseTimer) {
+      clearTimeout(extended.phaseTimer);
+    }
+
+    const previousPhase = extended.currentPhase;
+    extended.currentPhase = 5; // Voting
+
+    // Initialize voting
+    extended.votes.clear();
+    for (const player of room.players) {
+      player.hasVoted = false;
+    }
+
+    const phaseEndTime = Date.now() + VOTING_DURATION;
+
+    this.broadcastToRoom(roomId, {
+      type: "server:phase_changed",
+      gameId: roomId,
+      phase: 5,
+      previousPhase,
+      round: extended.currentRound,
+      phaseEndTime,
+      timestamp: Date.now(),
+    });
+
+    logger.info(`Voting phase started in room ${roomId}`);
+
+    // Set timer to resolve voting
+    extended.phaseTimer = setTimeout(() => {
+      this.resolveVoting(roomId);
+    }, VOTING_DURATION);
+  }
+
+  private resolveVoting(roomId: string): void {
+    const room = this.rooms.get(roomId);
+    const extended = this.extendedState.get(roomId);
+    if (!room || !extended) return;
+
+    // Clear any existing timer
+    if (extended.phaseTimer) {
+      clearTimeout(extended.phaseTimer);
+      extended.phaseTimer = null;
+    }
+
+    // Tally votes
+    const voteCounts = new Map<string, number>();
+    let skipCount = 0;
+
+    for (const target of extended.votes.values()) {
+      if (target === null) {
+        skipCount++;
+      } else {
+        voteCounts.set(target, (voteCounts.get(target) || 0) + 1);
+      }
+    }
+
+    // Find max votes
+    let maxVotes = skipCount;
+    let ejected: string | null = null;
+    let isTie = false;
+
+    for (const [target, count] of voteCounts) {
+      if (count > maxVotes) {
+        maxVotes = count;
+        ejected = target;
+        isTie = false;
+      } else if (count === maxVotes && ejected !== null) {
+        isTie = true;
+      }
+    }
+
+    if (isTie) {
+      ejected = null;
+      logger.info(`Voting tie in room ${roomId}, no ejection`);
+    }
+
+    const previousPhase = extended.currentPhase;
+    extended.currentPhase = 6; // VoteResult
+
+    // Eject player if there was a majority
+    let wasImpostor = false;
+    if (ejected) {
+      const ejectedPlayer = room.players.find(
+        p => p.address.toLowerCase() === ejected!.toLowerCase()
+      );
+      if (ejectedPlayer) {
+        ejectedPlayer.isAlive = false;
+        wasImpostor = extended.impostors.has(ejected.toLowerCase());
+      }
+
+      this.broadcastToRoom(roomId, {
+        type: "server:player_ejected",
+        gameId: roomId,
+        ejected,
+        wasImpostor,
+        round: extended.currentRound,
+        timestamp: Date.now(),
+      });
+
+      logger.info(`Player ejected in room ${roomId}: ${ejected} (${wasImpostor ? "Impostor" : "Crewmate"})`);
+    }
+
+    // Check win condition
+    const winResult = this.checkWinCondition(roomId);
+    if (winResult.winner) {
+      // Delay game end to show ejection
+      setTimeout(() => {
+        this.endGame(roomId, winResult.winner === "crewmates", winResult.reason!);
+      }, EJECTION_DURATION);
+      return;
+    }
+
+    // Return to ActionCommit phase after ejection screen
+    setTimeout(() => {
+      this.returnToActionPhase(roomId);
+    }, EJECTION_DURATION);
+  }
+
+  private returnToActionPhase(roomId: string): void {
+    const room = this.rooms.get(roomId);
+    const extended = this.extendedState.get(roomId);
+    if (!room || !extended) return;
+
+    // Clear bodies that were reported
+    extended.deadBodies = extended.deadBodies.filter(b => !b.reported);
+
+    // Increment round
+    extended.currentRound++;
+
+    const previousPhase = extended.currentPhase;
+    extended.currentPhase = 2; // ActionCommit
+
+    // Reset vote states
+    extended.votes.clear();
+    for (const player of room.players) {
+      player.hasVoted = false;
+    }
+
+    this.broadcastToRoom(roomId, {
+      type: "server:phase_changed",
+      gameId: roomId,
+      phase: 2,
+      previousPhase,
+      round: extended.currentRound,
+      phaseEndTime: Date.now() + 60000,
+      timestamp: Date.now(),
+    });
+
+    logger.info(`Returned to ActionCommit phase in room ${roomId}, round ${extended.currentRound}`);
+  }
+
+  // ============ WIN CONDITIONS ============
+
+  private checkWinCondition(roomId: string): WinConditionResult {
+    const room = this.rooms.get(roomId);
+    const extended = this.extendedState.get(roomId);
+    if (!room || !extended) return { winner: null };
+
+    const alivePlayers = room.players.filter(p => p.isAlive);
+    const aliveImpostors = alivePlayers.filter(p => extended.impostors.has(p.address.toLowerCase()));
+    const aliveCrewmates = alivePlayers.filter(p => !extended.impostors.has(p.address.toLowerCase()));
+
+    // Impostors win if they equal or outnumber crewmates
+    if (aliveImpostors.length >= aliveCrewmates.length && aliveCrewmates.length > 0) {
+      return { winner: "impostors", reason: "kills" };
+    }
+
+    // Crewmates win if all impostors are ejected
+    if (aliveImpostors.length === 0) {
+      return { winner: "crewmates", reason: "votes" };
+    }
+
+    return { winner: null };
+  }
+
+  private checkAndHandleWinCondition(roomId: string): void {
+    const winResult = this.checkWinCondition(roomId);
+    if (winResult.winner) {
+      this.endGame(roomId, winResult.winner === "crewmates", winResult.reason!);
+    }
+  }
+
+  private endGame(roomId: string, crewmatesWon: boolean, reason: "tasks" | "votes" | "kills"): void {
+    const room = this.rooms.get(roomId);
+    const extended = this.extendedState.get(roomId);
+    if (!room) return;
+
+    // Clear any timers
+    if (extended?.phaseTimer) {
+      clearTimeout(extended.phaseTimer);
+      extended.phaseTimer = null;
+    }
+
+    room.phase = "ended";
+    if (extended) {
+      extended.currentPhase = 7; // Ended
+    }
+
+    this.broadcastToRoom(roomId, {
+      type: "server:game_ended",
+      gameId: roomId,
+      crewmatesWon,
+      reason,
+      timestamp: Date.now(),
+    });
+
+    logger.info(`Game ended in room ${roomId}: ${crewmatesWon ? "Crewmates" : "Impostors"} win by ${reason}`);
+
+    // Clean up extended state after a delay
+    setTimeout(() => {
+      this.extendedState.delete(roomId);
+    }, 10000);
+  }
+
+  // ============ HELPER METHODS ============
+
+  getExtendedState(roomId: string): ExtendedRoomState | undefined {
+    return this.extendedState.get(roomId);
   }
 
   getStats() {

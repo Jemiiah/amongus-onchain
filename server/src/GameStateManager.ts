@@ -10,9 +10,23 @@ import { createLogger } from "./logger.js";
 
 const logger = createLogger("game-state-manager");
 
+// Internal game state tracking
+interface GameInternalState {
+  impostors: Set<string>; // addresses of impostors
+  votes: Map<string, string | null>; // voter -> target (null = skip)
+  taskLocations: Map<string, number[]>; // player -> assigned task locations
+}
+
+export interface WinConditionResult {
+  winner: "crewmates" | "impostors" | null;
+  reason?: "tasks" | "votes" | "kills";
+}
+
 export class GameStateManager {
   // gameId -> GameStateSnapshot
   private games: Map<string, GameStateSnapshot> = new Map();
+  // gameId -> internal state
+  private internalState: Map<string, GameInternalState> = new Map();
 
   /**
    * Create or get a game state
@@ -32,6 +46,11 @@ export class GameStateManager {
         activeSabotage: 0, // None
       };
       this.games.set(gameId, state);
+      this.internalState.set(gameId, {
+        impostors: new Set(),
+        votes: new Map(),
+        taskLocations: new Map(),
+      });
       logger.info(`Created new game state: ${gameId}`);
     }
     return this.games.get(gameId)!;
@@ -272,17 +291,6 @@ export class GameStateManager {
   }
 
   /**
-   * Delete a game
-   */
-  deleteGame(gameId: string): boolean {
-    const deleted = this.games.delete(gameId);
-    if (deleted) {
-      logger.info(`Game ${gameId} deleted`);
-    }
-    return deleted;
-  }
-
-  /**
    * Get all active game IDs
    */
   getActiveGameIds(): string[] {
@@ -298,5 +306,288 @@ export class GameStateManager {
       totalPlayers += game.players.length;
     }
     return { games: this.games.size, players: totalPlayers };
+  }
+
+  // ============ IMPOSTOR TRACKING ============
+
+  /**
+   * Assign impostors for a game
+   */
+  assignImpostors(gameId: string, addresses: string[]): void {
+    const internal = this.internalState.get(gameId);
+    if (!internal) return;
+
+    internal.impostors = new Set(addresses.map(a => a.toLowerCase()));
+    logger.info(`Assigned impostors in game ${gameId}: ${addresses.join(", ")}`);
+  }
+
+  /**
+   * Check if player is an impostor
+   */
+  isImpostor(gameId: string, address: string): boolean {
+    const internal = this.internalState.get(gameId);
+    if (!internal) return false;
+    return internal.impostors.has(address.toLowerCase());
+  }
+
+  /**
+   * Get all impostor addresses
+   */
+  getImpostors(gameId: string): string[] {
+    const internal = this.internalState.get(gameId);
+    if (!internal) return [];
+    return Array.from(internal.impostors);
+  }
+
+  /**
+   * Count alive impostors
+   */
+  getAliveImpostorCount(gameId: string): number {
+    const game = this.games.get(gameId);
+    const internal = this.internalState.get(gameId);
+    if (!game || !internal) return 0;
+
+    return game.players.filter(
+      p => p.isAlive && internal.impostors.has(p.address.toLowerCase())
+    ).length;
+  }
+
+  /**
+   * Count alive crewmates
+   */
+  getAliveCrewmateCount(gameId: string): number {
+    const game = this.games.get(gameId);
+    const internal = this.internalState.get(gameId);
+    if (!game || !internal) return 0;
+
+    return game.players.filter(
+      p => p.isAlive && !internal.impostors.has(p.address.toLowerCase())
+    ).length;
+  }
+
+  // ============ VOTING SYSTEM ============
+
+  /**
+   * Initialize voting for a new round
+   */
+  initVoting(gameId: string): void {
+    const internal = this.internalState.get(gameId);
+    if (!internal) return;
+
+    internal.votes.clear();
+
+    const game = this.games.get(gameId);
+    if (game) {
+      for (const player of game.players) {
+        player.hasVoted = false;
+      }
+    }
+
+    logger.info(`Initialized voting for game ${gameId}`);
+  }
+
+  /**
+   * Cast a vote
+   */
+  castVote(gameId: string, voter: string, target: string | null): boolean {
+    const game = this.games.get(gameId);
+    const internal = this.internalState.get(gameId);
+    if (!game || !internal) return false;
+
+    const voterPlayer = game.players.find(
+      p => p.address.toLowerCase() === voter.toLowerCase()
+    );
+    if (!voterPlayer || !voterPlayer.isAlive) return false;
+
+    internal.votes.set(voter.toLowerCase(), target ? target.toLowerCase() : null);
+    voterPlayer.hasVoted = true;
+
+    logger.debug(`Vote cast in game ${gameId}: ${voter} -> ${target || "skip"}`);
+    return true;
+  }
+
+  /**
+   * Check if all alive players have voted
+   */
+  allVotesCast(gameId: string): boolean {
+    const game = this.games.get(gameId);
+    const internal = this.internalState.get(gameId);
+    if (!game || !internal) return false;
+
+    const alivePlayers = game.players.filter(p => p.isAlive);
+    return alivePlayers.every(p => internal.votes.has(p.address.toLowerCase()));
+  }
+
+  /**
+   * Tally votes and return ejected player (or null if tie/skip)
+   */
+  tallyVotes(gameId: string): string | null {
+    const internal = this.internalState.get(gameId);
+    if (!internal) return null;
+
+    const voteCounts = new Map<string, number>();
+    let skipCount = 0;
+
+    for (const target of internal.votes.values()) {
+      if (target === null) {
+        skipCount++;
+      } else {
+        voteCounts.set(target, (voteCounts.get(target) || 0) + 1);
+      }
+    }
+
+    // Find max votes
+    let maxVotes = skipCount;
+    let ejected: string | null = null;
+    let isTie = false;
+
+    for (const [target, count] of voteCounts) {
+      if (count > maxVotes) {
+        maxVotes = count;
+        ejected = target;
+        isTie = false;
+      } else if (count === maxVotes) {
+        isTie = true;
+      }
+    }
+
+    if (isTie) {
+      logger.info(`Voting tie in game ${gameId}, no ejection`);
+      return null;
+    }
+
+    if (ejected) {
+      logger.info(`Voting result in game ${gameId}: ${ejected} ejected with ${maxVotes} votes`);
+    } else {
+      logger.info(`Voting result in game ${gameId}: skip with ${maxVotes} votes`);
+    }
+
+    return ejected;
+  }
+
+  // ============ WIN CONDITIONS ============
+
+  /**
+   * Check win condition
+   */
+  checkWinCondition(gameId: string): WinConditionResult {
+    const game = this.games.get(gameId);
+    const internal = this.internalState.get(gameId);
+    if (!game || !internal) return { winner: null };
+
+    const aliveImpostors = this.getAliveImpostorCount(gameId);
+    const aliveCrewmates = this.getAliveCrewmateCount(gameId);
+
+    // Impostors win if they equal or outnumber crewmates
+    if (aliveImpostors >= aliveCrewmates && aliveCrewmates > 0) {
+      return { winner: "impostors", reason: "kills" };
+    }
+
+    // Crewmates win if all impostors are ejected
+    if (aliveImpostors === 0) {
+      return { winner: "crewmates", reason: "votes" };
+    }
+
+    // Crewmates win if all tasks are done
+    if (game.totalTasksRequired > 0 && game.totalTasksCompleted >= game.totalTasksRequired) {
+      return { winner: "crewmates", reason: "tasks" };
+    }
+
+    return { winner: null };
+  }
+
+  // ============ BODY DETECTION ============
+
+  /**
+   * Get unreported bodies in a specific location
+   */
+  getUnreportedBodiesInRoom(gameId: string, location: Location): DeadBodyState[] {
+    const game = this.games.get(gameId);
+    if (!game) return [];
+
+    return game.deadBodies.filter(
+      body => body.location === location && !body.reported
+    );
+  }
+
+  /**
+   * Mark a body as reported
+   */
+  reportBody(gameId: string, victim: string): boolean {
+    const game = this.games.get(gameId);
+    if (!game) return false;
+
+    const body = game.deadBodies.find(
+      b => b.victim.toLowerCase() === victim.toLowerCase() && !b.reported
+    );
+    if (!body) return false;
+
+    body.reported = true;
+    logger.info(`Body reported in game ${gameId}: ${victim}`);
+    return true;
+  }
+
+  // ============ TASK VALIDATION ============
+
+  /**
+   * Assign task locations to a player
+   */
+  assignTasks(gameId: string, player: string, taskLocations: number[]): void {
+    const internal = this.internalState.get(gameId);
+    if (!internal) return;
+
+    internal.taskLocations.set(player.toLowerCase(), [...taskLocations]);
+    logger.debug(`Assigned tasks to ${player}: ${taskLocations.join(", ")}`);
+  }
+
+  /**
+   * Get a player's assigned task locations
+   */
+  getTaskLocations(gameId: string, player: string): number[] {
+    const internal = this.internalState.get(gameId);
+    if (!internal) return [];
+    return internal.taskLocations.get(player.toLowerCase()) || [];
+  }
+
+  /**
+   * Check if player can complete a task at location
+   */
+  canCompleteTask(gameId: string, player: string, location: Location): boolean {
+    const internal = this.internalState.get(gameId);
+    if (!internal) return false;
+
+    const tasks = internal.taskLocations.get(player.toLowerCase());
+    if (!tasks) return false;
+
+    return tasks.includes(location);
+  }
+
+  /**
+   * Complete a task and remove it from the player's list
+   */
+  completeTask(gameId: string, player: string, location: Location): boolean {
+    const internal = this.internalState.get(gameId);
+    if (!internal) return false;
+
+    const tasks = internal.taskLocations.get(player.toLowerCase());
+    if (!tasks) return false;
+
+    const index = tasks.indexOf(location);
+    if (index === -1) return false;
+
+    tasks.splice(index, 1);
+    return true;
+  }
+
+  /**
+   * Delete a game and its internal state
+   */
+  deleteGame(gameId: string): boolean {
+    this.internalState.delete(gameId);
+    const deleted = this.games.delete(gameId);
+    if (deleted) {
+      logger.info(`Game ${gameId} deleted`);
+    }
+    return deleted;
   }
 }

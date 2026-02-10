@@ -202,6 +202,30 @@ export function useGameServer(): UseGameServerReturn {
           });
           break;
 
+        case "server:body_reported":
+          addLog("kill", `Body reported! ${message.reporter} found ${message.victim}`);
+          // Mark body as reported
+          setDeadBodies((prev) =>
+            prev.map((b) =>
+              b.victim === message.victim ? { ...b, reported: true } : b
+            )
+          );
+          break;
+
+        case "server:player_ejected":
+          addLog("vote", `${message.ejected} was ejected. ${message.wasImpostor ? "They were an Impostor!" : "They were a Crewmate."}`);
+          // Mark player as dead
+          setCurrentRoom((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              players: prev.players.map((p) =>
+                p.address === message.ejected ? { ...p, isAlive: false } : p
+              ),
+            };
+          });
+          break;
+
         case "server:game_ended":
           addLog("start", message.crewmatesWon ? "Crewmates win!" : "Impostors win!");
           break;

@@ -113,7 +113,9 @@ export type ClientMessage =
   | AgentPhaseChangeMessage
   | AgentKillMessage
   | AgentVoteMessage
-  | AgentTaskCompleteMessage;
+  | AgentTaskCompleteMessage
+  | AgentReportBodyMessage
+  | OperatorWithdrawRequestMessage;
 
 // Kept for backwards compat
 export type AgentMessage = ClientMessage;
@@ -214,6 +216,23 @@ export interface AgentTaskCompleteMessage {
   totalTasks: number;
 }
 
+export interface AgentReportBodyMessage {
+  type: "agent:report_body";
+  gameId: string;
+  reporter: string;
+  bodyLocation: Location;
+  round: number;
+}
+
+// ============ OPERATOR MESSAGES ============
+
+export interface OperatorWithdrawRequestMessage {
+  type: "operator:withdraw_request";
+  operatorKey: string;        // oper_XXXXXXXXXXXX
+  agentAddress: string;       // Target agent wallet address
+  amount?: string;            // Amount in ether, or "max" for full balance
+}
+
 // Room state
 export interface RoomState {
   roomId: string;
@@ -241,7 +260,9 @@ export type ServerMessage =
   | ServerVoteCastMessage
   | ServerPlayerEjectedMessage
   | ServerTaskCompletedMessage
-  | ServerGameEndedMessage;
+  | ServerGameEndedMessage
+  | ServerBodyReportedMessage
+  | ServerWithdrawResultMessage;
 
 export interface ServerWelcomeMessage {
   type: "server:welcome";
@@ -351,6 +372,25 @@ export interface ServerGameEndedMessage {
   gameId: string;
   crewmatesWon: boolean;
   reason: "tasks" | "votes" | "kills";
+  timestamp: number;
+}
+
+export interface ServerBodyReportedMessage {
+  type: "server:body_reported";
+  gameId: string;
+  reporter: string;
+  victim: string;
+  location: Location;
+  round: number;
+  timestamp: number;
+}
+
+export interface ServerWithdrawResultMessage {
+  type: "server:withdraw_result";
+  success: boolean;
+  agentAddress: string;
+  txHash?: string;
+  error?: string;
   timestamp: number;
 }
 
