@@ -94,7 +94,7 @@ export const api = {
     return res.json();
   },
 
-  // Create agent wallet
+  // Create agent wallet (requires operator key auth)
   async createAgent(operatorKey: string): Promise<{
     success: boolean;
     agentAddress?: string;
@@ -103,15 +103,21 @@ export const api = {
   }> {
     const res = await fetch(`${API_URL}/api/agents`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ operatorKey }),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${operatorKey}`,
+      },
     });
     return res.json();
   },
 
-  // List agents for operator
+  // List agents for operator (requires operator key auth)
   async listAgents(operatorKey: string): Promise<{ agents: AgentWallet[]; count: number }> {
-    const res = await fetch(`${API_URL}/api/agents?operatorKey=${encodeURIComponent(operatorKey)}`);
+    const res = await fetch(`${API_URL}/api/agents`, {
+      headers: {
+        Authorization: `Bearer ${operatorKey}`,
+      },
+    });
     if (!res.ok) throw new Error("Failed to fetch agents");
     return res.json();
   },
@@ -136,47 +142,47 @@ export const api = {
     return res.json();
   },
 
-  // Get or create operator key for a wallet
-  async getOrCreateOperatorKey(walletAddress: string): Promise<{
-    operatorKey: string;
+  // Register an operator key (user provides their own key)
+  async registerOperatorKey(
+    operatorKey: string,
+    walletAddress: string
+  ): Promise<{
+    success: boolean;
     walletAddress: string;
     createdAt: number;
+    error?: string;
   }> {
-    // First try to get existing
-    let res = await fetch(`${API_URL}/api/operators/${walletAddress}`);
+    const res = await fetch(`${API_URL}/api/operators`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${operatorKey}`,
+      },
+      body: JSON.stringify({ walletAddress }),
+    });
 
-    if (res.status === 404) {
-      // Create new
-      res = await fetch(`${API_URL}/api/operators`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ walletAddress }),
-      });
+    if (res.status === 409) {
+      return { success: false, walletAddress, createdAt: 0, error: "Key already registered" };
     }
-
-    if (!res.ok) throw new Error("Failed to get operator key");
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ error: "Registration failed" }));
+      throw new Error(data.error || "Failed to register operator key");
+    }
     return res.json();
   },
 
-  // Get operator key by wallet
-  async getOperatorKey(walletAddress: string): Promise<{
-    operatorKey: string;
-    walletAddress: string;
-    createdAt: number;
-  } | null> {
-    const res = await fetch(`${API_URL}/api/operators/${walletAddress}`);
-    if (res.status === 404) return null;
-    if (!res.ok) throw new Error("Failed to get operator key");
-    return res.json();
-  },
-
-  // Validate operator key
+  // Validate operator key (check if authenticated)
   async validateOperatorKey(operatorKey: string): Promise<{
     valid: boolean;
     walletAddress?: string;
+    createdAt?: number;
   }> {
-    const res = await fetch(`${API_URL}/api/operators/validate/${operatorKey}`);
-    if (res.status === 404) return { valid: false };
+    const res = await fetch(`${API_URL}/api/operators/me`, {
+      headers: {
+        Authorization: `Bearer ${operatorKey}`,
+      },
+    });
+    if (res.status === 401) return { valid: false };
     if (!res.ok) throw new Error("Failed to validate operator key");
     return res.json();
   },

@@ -11,6 +11,8 @@ import {
 } from "@/lib/operatorKeys";
 import { usePrivyEnabled } from "@/components/layout/Providers";
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+
 interface CreateAgentModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -30,14 +32,41 @@ export function CreateAgentModal({
   const address = privyEnabled ? user?.wallet?.address as `0x${string}` | undefined : wagmiAddress;
   const [createdAgent, setCreatedAgent] = useState<OperatorKey | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!address) return;
 
-    const entry = createOperatorKeyEntry(address);
-    saveOperatorKey(entry);
-    setCreatedAgent(entry);
-    onAgentCreated?.(entry);
+    setLoading(true);
+    setError(null);
+
+    try {
+      const entry = createOperatorKeyEntry(address);
+
+      // Register the operator key with the server
+      const res = await fetch(`${API_URL}/api/operators`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${entry.key}`,
+        },
+        body: JSON.stringify({ walletAddress: address }),
+      });
+
+      if (!res.ok && res.status !== 409) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Failed to register operator key");
+      }
+
+      saveOperatorKey(entry);
+      setCreatedAgent(entry);
+      onAgentCreated?.(entry);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create agent");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCopy = async (text: string, field: string) => {
@@ -93,19 +122,24 @@ export function CreateAgentModal({
                   </div>
                 )}
 
+                {error && (
+                  <p className="text-red-400 text-sm mb-4">{error}</p>
+                )}
+
                 <div className="flex gap-3">
                   <button
-                    className="flex-1 px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
+                    className="flex-1 px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors disabled:opacity-50"
                     onClick={handleClose}
+                    disabled={loading}
                   >
                     Cancel
                   </button>
                   <button
                     className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={handleCreate}
-                    disabled={!address}
+                    disabled={!address || loading}
                   >
-                    Create Agent
+                    {loading ? "Creating..." : "Create Agent"}
                   </button>
                 </div>
               </>

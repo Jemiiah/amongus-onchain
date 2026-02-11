@@ -1,6 +1,5 @@
 import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
-import crypto from "crypto";
 import { createLogger } from "./logger.js";
 import { privyWalletService } from "./PrivyWalletService.js";
 import { wagerService } from "./WagerService.js";
@@ -10,56 +9,73 @@ const logger = createLogger("api");
 
 // ============ OPERATOR KEY STORAGE ============
 
-interface StoredOperatorKey {
-  operatorKey: string;
+interface RegisteredOperator {
+  operatorKey: string; // The key itself (hashed for comparison)
   walletAddress: string;
   createdAt: number;
 }
 
 // In-memory storage (in production, use a database)
-const operatorKeysByWallet = new Map<string, StoredOperatorKey>();
-const operatorKeyLookup = new Map<string, string>(); // operatorKey -> walletAddress
+// Maps operator key -> operator info
+const registeredOperators = new Map<string, RegisteredOperator>();
 
-function generateOperatorKey(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let result = "";
-  const randomBytes = crypto.randomBytes(16);
-  for (let i = 0; i < 16; i++) {
-    result += chars[randomBytes[i] % chars.length];
+function registerOperatorKey(operatorKey: string, walletAddress: string): boolean {
+  // Operator key must start with "oper_"
+  if (!operatorKey.startsWith("oper_")) {
+    return false;
   }
-  return `oper_${result}`;
-}
 
-function getOrCreateOperatorKey(walletAddress: string): StoredOperatorKey {
+  // Check if key already exists
+  if (registeredOperators.has(operatorKey)) {
+    return false;
+  }
+
   const normalizedAddress = walletAddress.toLowerCase();
-
-  // Check if already exists
-  const existing = operatorKeysByWallet.get(normalizedAddress);
-  if (existing) {
-    return existing;
-  }
-
-  // Create new operator key
-  const operatorKey = generateOperatorKey();
-  const entry: StoredOperatorKey = {
+  const entry: RegisteredOperator = {
     operatorKey,
     walletAddress: normalizedAddress,
     createdAt: Date.now(),
   };
 
-  operatorKeysByWallet.set(normalizedAddress, entry);
-  operatorKeyLookup.set(operatorKey, normalizedAddress);
-
-  logger.info(`Created operator key for ${normalizedAddress.slice(0, 10)}...`);
-  return entry;
+  registeredOperators.set(operatorKey, entry);
+  logger.info(`Registered operator key for ${normalizedAddress.slice(0, 10)}...`);
+  return true;
 }
 
-function getOperatorKeyByWallet(walletAddress: string): StoredOperatorKey | null {
-  return operatorKeysByWallet.get(walletAddress.toLowerCase()) || null;
+function validateOperatorKey(operatorKey: string): RegisteredOperator | null {
+  return registeredOperators.get(operatorKey) || null;
 }
 
-function validateOperatorKey(operatorKey: string): string | null {
-  return operatorKeyLookup.get(operatorKey) || null;
+// Extract Bearer token from Authorization header
+function extractBearerToken(req: Request): string | null {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return null;
+  }
+  return authHeader.slice(7); // Remove "Bearer " prefix
+}
+
+// Middleware to require operator authentication
+interface AuthenticatedRequest extends Request {
+  operator?: RegisteredOperator;
+}
+
+function requireOperatorAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  const operatorKey = extractBearerToken(req);
+
+  if (!operatorKey) {
+    res.status(401).json({ error: "Authorization header required. Use: Authorization: Bearer {operatorKey}" });
+    return;
+  }
+
+  const operator = validateOperatorKey(operatorKey);
+  if (!operator) {
+    res.status(401).json({ error: "Invalid operator key" });
+    return;
+  }
+
+  req.operator = operator;
+  next();
 }
 
 export function createApiServer(wsServer: WebSocketRelayServer) {
@@ -150,82 +166,14 @@ export function createApiServer(wsServer: WebSocketRelayServer) {
 
   // ============ OPERATOR KEYS ============
 
-  // Get or create operator key for a wallet address
+  // Register an operator key (user provides their own key)
+  // The operator key is passed in Authorization header, wallet address in body
   app.post("/api/operators", (req: Request, res: Response) => {
+    const operatorKey = extractBearerToken(req);
     const { walletAddress } = req.body;
 
-    if (!walletAddress || typeof walletAddress !== "string") {
-      res.status(400).json({ error: "walletAddress is required" });
-      return;
-    }
-
-    if (!/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
-      res.status(400).json({ error: "Invalid wallet address format" });
-      return;
-    }
-
-    const entry = getOrCreateOperatorKey(walletAddress);
-
-    res.json({
-      operatorKey: entry.operatorKey,
-      walletAddress: entry.walletAddress,
-      createdAt: entry.createdAt,
-    });
-  });
-
-  // Get operator key by wallet address
-  app.get("/api/operators/:walletAddress", (req: Request<{ walletAddress: string }>, res: Response) => {
-    const { walletAddress } = req.params;
-
-    if (!/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
-      res.status(400).json({ error: "Invalid wallet address format" });
-      return;
-    }
-
-    const entry = getOperatorKeyByWallet(walletAddress);
-
-    if (!entry) {
-      res.status(404).json({ error: "No operator key found for this wallet" });
-      return;
-    }
-
-    res.json({
-      operatorKey: entry.operatorKey,
-      walletAddress: entry.walletAddress,
-      createdAt: entry.createdAt,
-    });
-  });
-
-  // Validate an operator key (returns wallet address if valid)
-  app.get("/api/operators/validate/:operatorKey", (req: Request<{ operatorKey: string }>, res: Response) => {
-    const { operatorKey } = req.params;
-
-    if (!operatorKey.startsWith("oper_")) {
-      res.status(400).json({ error: "Invalid operator key format" });
-      return;
-    }
-
-    const walletAddress = validateOperatorKey(operatorKey);
-
-    if (!walletAddress) {
-      res.status(404).json({ error: "Operator key not found", valid: false });
-      return;
-    }
-
-    res.json({
-      valid: true,
-      walletAddress,
-    });
-  });
-
-  // ============ OPERATOR / AGENTS ============
-
-  // Create a new agent wallet
-  app.post("/api/agents", async (req: Request, res: Response) => {
-    const { operatorKey } = req.body;
-
-    if (!operatorKey || typeof operatorKey !== "string") {
-      res.status(400).json({ error: "operatorKey is required" });
+    if (!operatorKey) {
+      res.status(401).json({ error: "Authorization header required. Use: Authorization: Bearer {your_operator_key}" });
       return;
     }
 
@@ -234,60 +182,93 @@ export function createApiServer(wsServer: WebSocketRelayServer) {
       return;
     }
 
-    if (!privyWalletService.isEnabled()) {
-      res.status(503).json({
-        error: "Privy wallet service not configured",
-        message: "Set PRIVY_APP_ID and PRIVY_APP_SECRET in server environment",
-      });
+    if (!walletAddress || typeof walletAddress !== "string") {
+      res.status(400).json({ error: "walletAddress is required in body" });
       return;
     }
 
-    try {
-      const result = await privyWalletService.createAgentWallet(operatorKey);
-
-      if (result) {
-        logger.info(`Agent wallet created via API: ${result.address}`);
-        res.status(201).json({
-          success: true,
-          agentAddress: result.address,
-          userId: result.userId,
-          createdAt: Date.now(),
-        });
-      } else {
-        res.status(500).json({ error: "Failed to create agent wallet" });
-      }
-    } catch (error) {
-      logger.error("Error creating agent wallet:", error);
-      res.status(500).json({
-        error: "Internal server error",
-        message: error instanceof Error ? error.message : "Unknown error",
-      });
+    if (!/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
+      res.status(400).json({ error: "Invalid wallet address format" });
+      return;
     }
+
+    const success = registerOperatorKey(operatorKey, walletAddress);
+
+    if (!success) {
+      res.status(409).json({ error: "Operator key already registered" });
+      return;
+    }
+
+    res.status(201).json({
+      success: true,
+      walletAddress: walletAddress.toLowerCase(),
+      createdAt: Date.now(),
+    });
   });
 
-  // List agents for an operator
-  app.get("/api/agents", (req: Request, res: Response) => {
-    const operatorKey = req.query.operatorKey as string;
+  // Validate operator key (check if authenticated)
+  app.get("/api/operators/me", (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    requireOperatorAuth(req, res, () => {
+      res.json({
+        valid: true,
+        walletAddress: req.operator!.walletAddress,
+        createdAt: req.operator!.createdAt,
+      });
+    });
+  });
 
-    if (!operatorKey) {
-      res.status(400).json({ error: "operatorKey query parameter is required" });
-      return;
-    }
+  // ============ OPERATOR / AGENTS ============
 
-    if (!operatorKey.startsWith("oper_")) {
-      res.status(400).json({ error: "Invalid operator key format" });
-      return;
-    }
+  // Create a new agent wallet (requires operator auth)
+  app.post("/api/agents", (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    requireOperatorAuth(req, res, async () => {
+      if (!privyWalletService.isEnabled()) {
+        res.status(503).json({
+          error: "Privy wallet service not configured",
+          message: "Set PRIVY_APP_ID and PRIVY_APP_SECRET in server environment",
+        });
+        return;
+      }
 
-    const agents = privyWalletService.getAgentWalletsForOperator(operatorKey);
+      try {
+        const operatorKey = extractBearerToken(req)!;
+        const result = await privyWalletService.createAgentWallet(operatorKey);
 
-    res.json({
-      agents: agents.map((a) => ({
-        address: a.address,
-        userId: a.userId,
-        createdAt: a.createdAt,
-      })),
-      count: agents.length,
+        if (result) {
+          logger.info(`Agent wallet created via API: ${result.address}`);
+          res.status(201).json({
+            success: true,
+            agentAddress: result.address,
+            userId: result.userId,
+            createdAt: Date.now(),
+          });
+        } else {
+          res.status(500).json({ error: "Failed to create agent wallet" });
+        }
+      } catch (error) {
+        logger.error("Error creating agent wallet:", error);
+        res.status(500).json({
+          error: "Internal server error",
+          message: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
+    });
+  });
+
+  // List agents for an operator (requires operator auth)
+  app.get("/api/agents", (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    requireOperatorAuth(req, res, () => {
+      const operatorKey = extractBearerToken(req)!;
+      const agents = privyWalletService.getAgentWalletsForOperator(operatorKey);
+
+      res.json({
+        agents: agents.map((a) => ({
+          address: a.address,
+          userId: a.userId,
+          createdAt: a.createdAt,
+        })),
+        count: agents.length,
+      });
     });
   });
 
