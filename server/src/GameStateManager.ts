@@ -12,6 +12,7 @@ const logger = createLogger("game-state-manager");
 
 // Game constants
 const KILL_COOLDOWN_ROUNDS = 2; // Impostors must wait 2 rounds between kills
+const MAX_EMERGENCY_MEETINGS_PER_PLAYER = 1; // Each player gets 1 emergency meeting
 
 // Room adjacency map (The Skeld)
 // Location enum: Cafeteria=0, Admin=1, Storage=2, Electrical=3, MedBay=4, UpperEngine=5, LowerEngine=6, Security=7, Reactor=8
@@ -45,6 +46,7 @@ interface GameInternalState {
   votes: Map<string, string | null>; // voter -> target (null = skip)
   taskLocations: Map<string, number[]>; // player -> assigned task locations
   lastKillRound: Map<string, number>; // impostor -> last round they killed
+  emergencyMeetingsUsed: Map<string, number>; // player -> meetings used
 }
 
 export interface WinConditionResult {
@@ -81,6 +83,7 @@ export class GameStateManager {
         votes: new Map(),
         taskLocations: new Map(),
         lastKillRound: new Map(),
+        emergencyMeetingsUsed: new Map(),
       });
       logger.info(`Created new game state: ${gameId}`);
     }
@@ -533,6 +536,67 @@ export class GameStateManager {
     }
 
     return { valid: true };
+  }
+
+  // ============ EMERGENCY MEETINGS ============
+
+  /**
+   * Check if player can call an emergency meeting
+   */
+  canCallMeeting(gameId: string, playerAddress: string): { canCall: boolean; reason?: string; remaining: number } {
+    const game = this.games.get(gameId);
+    const internal = this.internalState.get(gameId);
+    if (!game || !internal) {
+      return { canCall: false, reason: "Game not found", remaining: 0 };
+    }
+
+    const player = game.players.find(
+      p => p.address.toLowerCase() === playerAddress.toLowerCase()
+    );
+    if (!player) {
+      return { canCall: false, reason: "Player not in game", remaining: 0 };
+    }
+
+    if (!player.isAlive) {
+      return { canCall: false, reason: "Dead players cannot call meetings", remaining: 0 };
+    }
+
+    const playerKey = playerAddress.toLowerCase();
+    const meetingsUsed = internal.emergencyMeetingsUsed.get(playerKey) ?? 0;
+    const remaining = MAX_EMERGENCY_MEETINGS_PER_PLAYER - meetingsUsed;
+
+    if (remaining <= 0) {
+      return { canCall: false, reason: "No emergency meetings remaining", remaining: 0 };
+    }
+
+    return { canCall: true, remaining };
+  }
+
+  /**
+   * Use an emergency meeting
+   */
+  useEmergencyMeeting(gameId: string, playerAddress: string): number {
+    const internal = this.internalState.get(gameId);
+    if (!internal) return 0;
+
+    const playerKey = playerAddress.toLowerCase();
+    const meetingsUsed = (internal.emergencyMeetingsUsed.get(playerKey) ?? 0) + 1;
+    internal.emergencyMeetingsUsed.set(playerKey, meetingsUsed);
+
+    const remaining = MAX_EMERGENCY_MEETINGS_PER_PLAYER - meetingsUsed;
+    logger.info(`Emergency meeting called by ${playerAddress}, ${remaining} meetings remaining`);
+    return remaining;
+  }
+
+  /**
+   * Get remaining emergency meetings for a player
+   */
+  getRemainingMeetings(gameId: string, playerAddress: string): number {
+    const internal = this.internalState.get(gameId);
+    if (!internal) return 0;
+
+    const meetingsUsed = internal.emergencyMeetingsUsed.get(playerAddress.toLowerCase()) ?? 0;
+    return MAX_EMERGENCY_MEETINGS_PER_PLAYER - meetingsUsed;
   }
 
   // ============ VOTING SYSTEM ============

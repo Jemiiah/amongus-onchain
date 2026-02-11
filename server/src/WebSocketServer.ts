@@ -513,6 +513,14 @@ export class WebSocketRelayServer {
         this.handleGetBalance(client);
         break;
 
+      case "agent:call_meeting":
+        this.handleCallMeeting(client, message.gameId);
+        break;
+
+      case "agent:chat":
+        this.handleChat(client, message.gameId, message.message);
+        break;
+
       default:
         logger.warn(`Unknown message type from ${client.id}`);
     }
@@ -989,10 +997,21 @@ export class WebSocketRelayServer {
     }
 
     const playerState = room.players.find((p) => p.address === player);
-    if (playerState) {
-      playerState.tasksCompleted = tasksCompleted;
-      playerState.totalTasks = totalTasks;
+    if (!playerState) return;
+
+    // Impostors cannot complete real tasks (they can only fake)
+    if (this.gameStateManager.isImpostor(roomId, player)) {
+      this.send(client, {
+        type: "server:error",
+        code: "IMPOSTOR_CANNOT_TASK",
+        message: "Impostors cannot complete real tasks",
+      });
+      return;
     }
+
+    // Both alive crewmates and ghost crewmates can complete tasks
+    playerState.tasksCompleted = tasksCompleted;
+    playerState.totalTasks = totalTasks;
 
     // Calculate total progress
     const totalDone = room.players.reduce((sum, p) => sum + p.tasksCompleted, 0);
@@ -1160,6 +1179,135 @@ export class WebSocketRelayServer {
 
     // Start discussion phase
     this.startDiscussionPhase(roomId);
+  }
+
+  private handleCallMeeting(client: Client, roomId: string): void {
+    const room = this.rooms.get(roomId);
+    const extended = this.extendedState.get(roomId);
+    if (!room || !extended) return;
+
+    if (!client.address) {
+      this.send(client, {
+        type: "server:error",
+        code: "NOT_AUTHENTICATED",
+        message: "Must be authenticated to call meeting",
+      });
+      return;
+    }
+
+    // Only allow during ActionCommit phase
+    if (extended.currentPhase !== 2) {
+      this.send(client, {
+        type: "server:error",
+        code: "INVALID_PHASE",
+        message: "Can only call meetings during action phase",
+      });
+      return;
+    }
+
+    // Check if player can call meeting
+    const canCall = this.gameStateManager.canCallMeeting(roomId, client.address);
+    if (!canCall.canCall) {
+      this.send(client, {
+        type: "server:error",
+        code: "CANNOT_CALL_MEETING",
+        message: canCall.reason || "Cannot call emergency meeting",
+      });
+      return;
+    }
+
+    // Use the meeting
+    const remaining = this.gameStateManager.useEmergencyMeeting(roomId, client.address);
+
+    // Broadcast meeting called
+    this.broadcastToRoom(roomId, {
+      type: "server:meeting_called",
+      gameId: roomId,
+      caller: client.address,
+      meetingsRemaining: remaining,
+      timestamp: Date.now(),
+    });
+
+    logger.info(`Emergency meeting called in room ${roomId} by ${client.address}`);
+
+    // Start discussion phase
+    this.startDiscussionPhase(roomId);
+  }
+
+  private handleChat(client: Client, roomId: string, message: string): void {
+    const room = this.rooms.get(roomId);
+    const extended = this.extendedState.get(roomId);
+    if (!room || !extended) return;
+
+    if (!client.address) {
+      this.send(client, {
+        type: "server:error",
+        code: "NOT_AUTHENTICATED",
+        message: "Must be authenticated to chat",
+      });
+      return;
+    }
+
+    // Only allow during Discussion or Voting phase
+    if (extended.currentPhase !== 4 && extended.currentPhase !== 5) {
+      this.send(client, {
+        type: "server:error",
+        code: "INVALID_PHASE",
+        message: "Chat is only available during discussion and voting phases",
+      });
+      return;
+    }
+
+    // Find sender player
+    const senderPlayer = room.players.find(
+      p => p.address.toLowerCase() === client.address!.toLowerCase()
+    );
+    if (!senderPlayer) return;
+
+    // Sanitize message (limit length, remove dangerous content)
+    const sanitizedMessage = message.slice(0, 200).trim();
+    if (!sanitizedMessage) return;
+
+    const isGhostChat = !senderPlayer.isAlive;
+    const senderName = client.name || client.address.slice(0, 8);
+
+    // Broadcast to appropriate players
+    if (isGhostChat) {
+      // Ghost chat - only send to other dead players and spectators
+      for (const [clientId, targetClient] of this.clients) {
+        if (targetClient.roomId !== roomId) continue;
+
+        const targetPlayer = room.players.find(
+          p => p.address?.toLowerCase() === targetClient.address?.toLowerCase()
+        );
+
+        // Send to dead players or spectators (non-players)
+        if (!targetPlayer || !targetPlayer.isAlive) {
+          this.send(targetClient, {
+            type: "server:chat",
+            gameId: roomId,
+            sender: client.address,
+            senderName,
+            message: sanitizedMessage,
+            isGhostChat: true,
+            timestamp: Date.now(),
+          });
+        }
+      }
+    } else {
+      // Living player chat - broadcast to everyone
+      this.broadcastToRoom(roomId, {
+        type: "server:chat",
+        gameId: roomId,
+        sender: client.address,
+        senderName,
+        message: sanitizedMessage,
+        isGhostChat: false,
+        timestamp: Date.now(),
+      });
+    }
+
+    logger.debug(`Chat in room ${roomId} from ${senderName}: ${sanitizedMessage.slice(0, 50)}...`);
   }
 
   // ============ PHASE MANAGEMENT ============

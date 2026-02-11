@@ -135,7 +135,9 @@ export type ClientMessage =
   | OperatorListAgentsMessage
   | AgentDepositMessage
   | AgentSubmitWagerMessage
-  | AgentGetBalanceMessage;
+  | AgentGetBalanceMessage
+  | AgentCallMeetingMessage
+  | AgentChatMessage;
 
 // Kept for backwards compat
 export type AgentMessage = ClientMessage;
@@ -262,6 +264,17 @@ export interface AgentGetBalanceMessage {
   type: "agent:get_balance";
 }
 
+export interface AgentCallMeetingMessage {
+  type: "agent:call_meeting";
+  gameId: string;
+}
+
+export interface AgentChatMessage {
+  type: "agent:chat";
+  gameId: string;
+  message: string;
+}
+
 // ============ OPERATOR MESSAGES ============
 
 export interface OperatorWithdrawRequestMessage {
@@ -322,7 +335,9 @@ export type ServerMessage =
   | ServerWagerAcceptedMessage
   | ServerWagerFailedMessage
   | ServerDepositConfirmedMessage
-  | ServerPotUpdatedMessage;
+  | ServerPotUpdatedMessage
+  | ServerMeetingCalledMessage
+  | ServerChatBroadcastMessage;
 
 export interface ServerWelcomeMessage {
   type: "server:welcome";
@@ -594,6 +609,24 @@ export interface ServerPotUpdatedMessage {
   gameId: string;
   totalPot: string;
   playerCount: number;
+  timestamp: number;
+}
+
+export interface ServerMeetingCalledMessage {
+  type: "server:meeting_called";
+  gameId: string;
+  caller: string;
+  meetingsRemaining: number;
+  timestamp: number;
+}
+
+export interface ServerChatBroadcastMessage {
+  type: "server:chat";
+  gameId: string;
+  sender: string;
+  senderName: string;
+  message: string;
+  isGhostChat: boolean; // True if from/to dead players only
   timestamp: number;
 }
 
