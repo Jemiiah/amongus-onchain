@@ -16,6 +16,7 @@ import { GameStateManager, WinConditionResult } from "./GameStateManager.js";
 import { privyWalletService } from "./PrivyWalletService.js";
 import { wagerService } from "./WagerService.js";
 import { contractService } from "./ContractService.js";
+import { databaseService } from "./DatabaseService.js";
 
 const logger = createLogger("websocket-server");
 
@@ -146,6 +147,9 @@ export class WebSocketRelayServer {
     slot.state = "active";
     slot.roomId = roomId;
     slot.cooldownEndTime = null;
+
+    // Persist to database (background)
+    databaseService.createGame(roomId);
 
     logger.info(`Room ${roomId} created for slot ${slotId}`);
 
@@ -886,6 +890,15 @@ export class WebSocketRelayServer {
     }
 
     logger.info(`Game started in room ${roomId} with ${room.players.length} players, ${impostorCount} impostors: ${impostorAddresses.join(", ")}`);
+
+    // Persist game start to database (background)
+    const wagerAmount = wagerService.getWagerAmount();
+    databaseService.startGame(roomId, room.players.map(p => ({
+      walletAddress: p.address,
+      isImpostor: extended.impostors.has(p.address.toLowerCase()),
+      colorId: p.colorId,
+      wagerAmount,
+    })));
 
     // Create game on-chain (async, don't block game flow)
     const playerAddresses = room.players.map(p => p.address);
@@ -2116,10 +2129,26 @@ export class WebSocketRelayServer {
     });
     const playerTasks = room.players.map(p => p.tasksCompleted);
 
+    // Persist game end to database (background)
+    databaseService.endGame(roomId, {
+      crewmatesWon,
+      winReason: reason,
+      winners,
+      playerStats: room.players.map(p => ({
+        walletAddress: p.address,
+        kills: this.agentStats.get(p.address.toLowerCase())?.kills ?? 0,
+        tasksCompleted: p.tasksCompleted,
+        isAlive: p.isAlive,
+      })),
+      winningsPerPlayer: wagerResult.winningsPerPlayer,
+    });
+
     contractService.settleGame(roomId, crewmatesWon, winners, playerAddresses, playerKills, playerTasks)
       .then(success => {
         if (success) {
           logger.info(`Game ${roomId} settled on-chain successfully`);
+          // Update database with settlement tx hash
+          // (would need to modify settleGame to return tx hash)
         } else {
           logger.warn(`Failed to settle game ${roomId} on-chain`);
         }
