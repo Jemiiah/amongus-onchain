@@ -89,6 +89,9 @@ interface SabotageState {
   sabotager: string;
 }
 
+// Camera locations (rooms that cameras can see)
+const CAMERA_LOCATIONS: number[] = [0, 2, 4, 8]; // Cafeteria, Storage, MedBay, Reactor
+
 // Internal game state tracking
 interface GameInternalState {
   impostors: Set<string>; // addresses of impostors
@@ -99,6 +102,7 @@ interface GameInternalState {
   activeSabotage: SabotageState | null; // current sabotage
   lastSabotageTime: number; // timestamp of last sabotage
   playersInVent: Set<string>; // players currently hiding in vents
+  playersOnCameras: Set<string>; // players currently watching cameras
 }
 
 export interface WinConditionResult {
@@ -139,6 +143,7 @@ export class GameStateManager {
         activeSabotage: null,
         lastSabotageTime: 0,
         playersInVent: new Set(),
+        playersOnCameras: new Set(),
       });
       logger.info(`Created new game state: ${gameId}`);
     }
@@ -906,6 +911,103 @@ export class GameStateManager {
     const playersInVent = Array.from(internal.playersInVent);
     internal.playersInVent.clear();
     return playersInVent;
+  }
+
+  // ============ CAMERA SYSTEM ============
+
+  /**
+   * Get camera-monitored locations
+   */
+  getCameraLocations(): number[] {
+    return CAMERA_LOCATIONS;
+  }
+
+  /**
+   * Start watching cameras
+   */
+  startWatchingCameras(gameId: string, playerAddress: string): boolean {
+    const internal = this.internalState.get(gameId);
+    if (!internal) return false;
+
+    internal.playersOnCameras.add(playerAddress.toLowerCase());
+    logger.info(`Player ${playerAddress} started watching cameras in game ${gameId}`);
+    return true;
+  }
+
+  /**
+   * Stop watching cameras
+   */
+  stopWatchingCameras(gameId: string, playerAddress: string): boolean {
+    const internal = this.internalState.get(gameId);
+    if (!internal) return false;
+
+    internal.playersOnCameras.delete(playerAddress.toLowerCase());
+    logger.info(`Player ${playerAddress} stopped watching cameras in game ${gameId}`);
+    return true;
+  }
+
+  /**
+   * Check if player is watching cameras
+   */
+  isWatchingCameras(gameId: string, playerAddress: string): boolean {
+    const internal = this.internalState.get(gameId);
+    if (!internal) return false;
+    return internal.playersOnCameras.has(playerAddress.toLowerCase());
+  }
+
+  /**
+   * Get count of players watching cameras
+   */
+  getCameraWatcherCount(gameId: string): number {
+    const internal = this.internalState.get(gameId);
+    if (!internal) return 0;
+    return internal.playersOnCameras.size;
+  }
+
+  /**
+   * Check if cameras are being watched (for red light indicator)
+   */
+  areCamerasInUse(gameId: string): boolean {
+    return this.getCameraWatcherCount(gameId) > 0;
+  }
+
+  /**
+   * Get players visible on cameras
+   */
+  getPlayersOnCameras(gameId: string): Array<{ address: string; location: number; isAlive: boolean }> {
+    const game = this.games.get(gameId);
+    const internal = this.internalState.get(gameId);
+    if (!game || !internal) return [];
+
+    const visiblePlayers: Array<{ address: string; location: number; isAlive: boolean }> = [];
+
+    for (const player of game.players) {
+      // Skip players in vents (they're hidden)
+      if (internal.playersInVent.has(player.address.toLowerCase())) {
+        continue;
+      }
+
+      // Check if player is in a camera-monitored location
+      if (CAMERA_LOCATIONS.includes(player.location)) {
+        visiblePlayers.push({
+          address: player.address,
+          location: player.location,
+          isAlive: player.isAlive,
+        });
+      }
+    }
+
+    return visiblePlayers;
+  }
+
+  /**
+   * Clear all camera watchers (e.g., when meeting starts)
+   */
+  clearAllCameraWatchers(gameId: string): void {
+    const internal = this.internalState.get(gameId);
+    if (internal) {
+      internal.playersOnCameras.clear();
+    }
   }
 
   // ============ VOTING SYSTEM ============

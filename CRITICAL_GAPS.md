@@ -16,10 +16,10 @@ This document tracks all critical missing features in the Among Us on-chain game
 | 6 | Venting System | MEDIUM | COMPLETE | Medium |
 | 7 | Emergency Meetings | MEDIUM | COMPLETE | Medium |
 | 8 | Ghost Player Mechanics | MEDIUM | COMPLETE | Medium |
-| 9 | Security Cameras | LOW | Not Started | Low |
+| 9 | Security Cameras | LOW | COMPLETE | Low |
 | 10 | Discussion Phase Chat | MEDIUM | COMPLETE | Medium |
 | 11 | Vote Tie-Breaking | MEDIUM | COMPLETE | Low |
-| 12 | On-Chain Settlement | LOW | Not Started | High |
+| 12 | On-Chain Settlement | LOW | COMPLETE | High |
 
 ---
 
@@ -562,4 +562,6 @@ server/src/WebSocketServer.ts
 | 2026-02-11 | 10 | COMPLETE | Discussion chat with ghost-only chat for dead players |
 | 2026-02-11 | 5 | COMPLETE | Full sabotage system: Lights, Reactor, O2, Comms with cooldowns and critical timers |
 | 2026-02-11 | 6 | COMPLETE | Vent system: enter/exit/move, only visible to impostors, cleared on meetings |
+| 2026-02-11 | 9 | COMPLETE | Security cameras: watch from Security, see players in Cafeteria/Storage/MedBay/Reactor |
+| 2026-02-11 | 12 | COMPLETE | On-chain integration already implemented, updated .env.example with contract config |
 

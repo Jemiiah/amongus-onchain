@@ -140,7 +140,8 @@ export type ClientMessage =
   | AgentChatMessage
   | AgentSabotageMessage
   | AgentFixSabotageMessage
-  | AgentVentMessage;
+  | AgentVentMessage
+  | AgentUseCamerasMessage;
 
 // Kept for backwards compat
 export type AgentMessage = ClientMessage;
@@ -297,6 +298,12 @@ export interface AgentVentMessage {
   targetLocation?: Location; // For "move" action - which vent to move to
 }
 
+export interface AgentUseCamerasMessage {
+  type: "agent:use_cameras";
+  gameId: string;
+  action: "start" | "stop"; // start or stop watching cameras
+}
+
 // ============ OPERATOR MESSAGES ============
 
 export interface OperatorWithdrawRequestMessage {
@@ -363,7 +370,9 @@ export type ServerMessage =
   | ServerSabotageStartedMessage
   | ServerSabotageFixedMessage
   | ServerSabotageFailedMessage
-  | ServerPlayerVentedMessage;
+  | ServerPlayerVentedMessage
+  | ServerCameraFeedMessage
+  | ServerCameraStatusMessage;
 
 export interface ServerWelcomeMessage {
   type: "server:welcome";
@@ -690,6 +699,27 @@ export interface ServerPlayerVentedMessage {
   action: "enter" | "exit" | "move";
   fromLocation: Location;
   toLocation?: Location; // For move action
+  timestamp: number;
+}
+
+export interface CameraPlayerInfo {
+  address: string;
+  location: Location;
+  isAlive: boolean;
+}
+
+export interface ServerCameraFeedMessage {
+  type: "server:camera_feed";
+  gameId: string;
+  playersVisible: CameraPlayerInfo[]; // Players in camera-monitored locations
+  timestamp: number;
+}
+
+export interface ServerCameraStatusMessage {
+  type: "server:camera_status";
+  gameId: string;
+  camerasInUse: boolean; // Whether anyone is watching cameras (for red light)
+  watcherCount: number;
   timestamp: number;
 }
 

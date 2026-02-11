@@ -534,6 +534,10 @@ export class WebSocketRelayServer {
         this.handleVent(client, message.gameId, message.action, message.targetLocation);
         break;
 
+      case "agent:use_cameras":
+        this.handleUseCameras(client, message.gameId, message.action);
+        break;
+
       default:
         logger.warn(`Unknown message type from ${client.id}`);
     }
@@ -1667,6 +1671,99 @@ export class WebSocketRelayServer {
     }
   }
 
+  // ============ CAMERA SYSTEM ============
+
+  private handleUseCameras(client: Client, roomId: string, action: "start" | "stop"): void {
+    const room = this.rooms.get(roomId);
+    const extended = this.extendedState.get(roomId);
+    if (!room || !extended) return;
+
+    if (!client.address) {
+      this.send(client, {
+        type: "server:error",
+        code: "NOT_AUTHENTICATED",
+        message: "Must be authenticated to use cameras",
+      });
+      return;
+    }
+
+    // Only allow during ActionCommit phase
+    if (extended.currentPhase !== 2) {
+      this.send(client, {
+        type: "server:error",
+        code: "INVALID_PHASE",
+        message: "Can only use cameras during action phase",
+      });
+      return;
+    }
+
+    // Get player and verify they're alive and at Security
+    const player = room.players.find(
+      p => p.address.toLowerCase() === client.address!.toLowerCase()
+    );
+    if (!player || !player.isAlive) {
+      this.send(client, {
+        type: "server:error",
+        code: "PLAYER_DEAD",
+        message: "Dead players cannot use cameras",
+      });
+      return;
+    }
+
+    // Must be at Security (location 7) to use cameras
+    if (player.location !== 7) {
+      this.send(client, {
+        type: "server:error",
+        code: "WRONG_LOCATION",
+        message: "Must be at Security to use cameras",
+      });
+      return;
+    }
+
+    if (action === "start") {
+      this.gameStateManager.startWatchingCameras(roomId, client.address);
+
+      // Send initial camera feed
+      this.sendCameraFeed(client, roomId);
+
+      logger.info(`Player ${client.address} started watching cameras in room ${roomId}`);
+    } else {
+      this.gameStateManager.stopWatchingCameras(roomId, client.address);
+      logger.info(`Player ${client.address} stopped watching cameras in room ${roomId}`);
+    }
+
+    // Broadcast camera status change (red light indicator)
+    this.broadcastCameraStatus(roomId);
+  }
+
+  private sendCameraFeed(client: Client, roomId: string): void {
+    const playersVisible = this.gameStateManager.getPlayersOnCameras(roomId);
+
+    this.send(client, {
+      type: "server:camera_feed",
+      gameId: roomId,
+      playersVisible: playersVisible.map(p => ({
+        address: p.address,
+        location: p.location as Location,
+        isAlive: p.isAlive,
+      })),
+      timestamp: Date.now(),
+    });
+  }
+
+  private broadcastCameraStatus(roomId: string): void {
+    const camerasInUse = this.gameStateManager.areCamerasInUse(roomId);
+    const watcherCount = this.gameStateManager.getCameraWatcherCount(roomId);
+
+    this.broadcastToRoom(roomId, {
+      type: "server:camera_status",
+      gameId: roomId,
+      camerasInUse,
+      watcherCount,
+      timestamp: Date.now(),
+    });
+  }
+
   // ============ PHASE MANAGEMENT ============
 
   private startDiscussionPhase(roomId: string): void {
@@ -1684,6 +1781,9 @@ export class WebSocketRelayServer {
 
     // Force all players out of vents
     this.gameStateManager.clearAllVents(roomId);
+
+    // Stop all camera watchers
+    this.gameStateManager.clearAllCameraWatchers(roomId);
 
     const previousPhase = extended.currentPhase;
     extended.currentPhase = 4; // Discussion
