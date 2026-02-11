@@ -14,6 +14,7 @@ import { createLogger } from "./logger.js";
 import { GameStateManager, WinConditionResult } from "./GameStateManager.js";
 import { privyWalletService } from "./PrivyWalletService.js";
 import { wagerService } from "./WagerService.js";
+import { contractService } from "./ContractService.js";
 
 const logger = createLogger("websocket-server");
 
@@ -224,6 +225,22 @@ export class WebSocketRelayServer {
           const refunded = wagerService.refundGame(slot.roomId);
           if (refunded) {
             logger.info(`Refunded wagers for cancelled room ${slot.roomId}`);
+          }
+
+          // Cancel game on-chain if it was playing
+          if (room.phase === "playing") {
+            const roomIdToCancel = slot.roomId;
+            contractService.cancelGame(roomIdToCancel)
+              .then(success => {
+                if (success) {
+                  logger.info(`Game ${roomIdToCancel} cancelled on-chain successfully`);
+                } else {
+                  logger.warn(`Failed to cancel game ${roomIdToCancel} on-chain`);
+                }
+              })
+              .catch(err => {
+                logger.error(`Error cancelling game ${roomIdToCancel} on-chain:`, err);
+              });
           }
         }
 
@@ -776,6 +793,20 @@ export class WebSocketRelayServer {
 
     logger.info(`Game started in room ${roomId} with ${room.players.length} players, ${impostorCount} impostors: ${impostorAddresses.join(", ")}`);
 
+    // Create game on-chain (async, don't block game flow)
+    const playerAddresses = room.players.map(p => p.address);
+    contractService.createGame(roomId, playerAddresses, impostorAddresses)
+      .then(success => {
+        if (success) {
+          logger.info(`Game ${roomId} created on-chain successfully`);
+        } else {
+          logger.warn(`Failed to create game ${roomId} on-chain (continuing in off-chain mode)`);
+        }
+      })
+      .catch(err => {
+        logger.error(`Error creating game ${roomId} on-chain:`, err);
+      });
+
     // Broadcast game start (phase change)
     this.broadcastToRoom(roomId, {
       type: "server:phase_changed",
@@ -1310,6 +1341,26 @@ export class WebSocketRelayServer {
     const wagerResult = wagerService.distributeWinnings(roomId, winners, losers);
     const totalPot = wagerService.getGamePot(roomId);
 
+    // Settle game on-chain (async, don't block game flow)
+    const playerAddresses = room.players.map(p => p.address);
+    const playerKills = room.players.map(p => {
+      const stats = this.agentStats.get(p.address.toLowerCase());
+      return stats?.kills ?? 0;
+    });
+    const playerTasks = room.players.map(p => p.tasksCompleted);
+
+    contractService.settleGame(roomId, crewmatesWon, winners, playerAddresses, playerKills, playerTasks)
+      .then(success => {
+        if (success) {
+          logger.info(`Game ${roomId} settled on-chain successfully`);
+        } else {
+          logger.warn(`Failed to settle game ${roomId} on-chain`);
+        }
+      })
+      .catch(err => {
+        logger.error(`Error settling game ${roomId} on-chain:`, err);
+      });
+
     room.phase = "ended";
     if (extended) {
       extended.currentPhase = 7; // Ended
@@ -1541,6 +1592,19 @@ export class WebSocketRelayServer {
     const extended = this.extendedState.get(roomId);
     if (extended?.phaseTimer) {
       clearTimeout(extended.phaseTimer);
+    }
+
+    // Cancel game on-chain if it was playing
+    if (room.phase === "playing") {
+      contractService.cancelGame(roomId)
+        .then(success => {
+          if (success) {
+            logger.info(`Game ${roomId} cancelled on-chain (manual delete)`);
+          }
+        })
+        .catch(err => {
+          logger.error(`Error cancelling game ${roomId} on-chain:`, err);
+        });
     }
 
     // Notify all clients in the room
