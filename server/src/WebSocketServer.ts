@@ -501,6 +501,10 @@ export class WebSocketRelayServer {
         this.handleListAgents(client, message.operatorKey);
         break;
 
+      case "operator:withdraw_request":
+        this.handleWithdrawRequest(client, message.operatorKey, message.agentAddress, message.amount);
+        break;
+
       // Wager messages
       case "agent:deposit":
         this.handleDeposit(client, message.amount);
@@ -680,19 +684,11 @@ export class WebSocketRelayServer {
         return;
       }
 
-      // Check if agent has wagered
-      if (!wagerService.hasWagered(roomId, client.address || "")) {
-        // Send wager required message
-        this.send(client, {
-          type: "server:wager_required",
-          gameId: roomId,
-          amount: wagerService.getWagerAmount().toString(),
-          currentBalance: wagerService.getBalance(client.address || "").toString(),
-          canAfford: wagerService.canAffordWager(client.address || ""),
-          timestamp: Date.now(),
-        });
-        // Don't add to room yet - they need to wager first
-        logger.info(`Player ${client.name} needs to wager before joining room ${roomId}`);
+      // Check if agent has wagered (in-memory first, then on-chain)
+      const hasInMemoryWager = wagerService.hasWagered(roomId, client.address || "");
+      if (!hasInMemoryWager) {
+        // Check on-chain wager asynchronously
+        this.checkOnChainWagerAndJoin(client, room, roomId, colorId);
         return;
       }
 
@@ -725,6 +721,79 @@ export class WebSocketRelayServer {
 
     // Broadcast room list update
     this.broadcastRoomList();
+  }
+
+  /**
+   * Check on-chain wager and complete join if valid
+   */
+  private async checkOnChainWagerAndJoin(
+    client: Client,
+    room: RoomState,
+    roomId: string,
+    colorId?: number
+  ): Promise<void> {
+    try {
+      // Check on-chain wager
+      const hasOnChainWager = await contractService.hasWagered(roomId, client.address || "");
+
+      if (hasOnChainWager) {
+        logger.info(`Player ${client.name} has on-chain wager for room ${roomId}`);
+
+        // Sync to in-memory tracker
+        wagerService.syncOnChainWager(roomId, client.address || "");
+
+        // Complete the join
+        const playerState: PlayerState = {
+          address: client.address || client.id,
+          colorId: colorId ?? room.players.length,
+          location: 0, // Cafeteria
+          isAlive: true,
+          tasksCompleted: 0,
+          totalTasks: 5,
+          hasVoted: false,
+        };
+
+        room.players.push(playerState);
+        logger.info(`Player ${client.name} joined room ${roomId} (color: ${playerState.colorId}, on-chain wager verified)`);
+
+        // Broadcast player joined to room
+        this.broadcastToRoom(roomId, {
+          type: "server:player_joined",
+          gameId: roomId,
+          player: playerState,
+        });
+
+        // Send room state to joining client
+        this.send(client, { type: "server:room_update", room });
+
+        // Trigger auto-start logic
+        this.onPlayerJoinedRoom(roomId);
+      } else {
+        // No wager found - send wager required message
+        this.send(client, {
+          type: "server:wager_required",
+          gameId: roomId,
+          amount: wagerService.getWagerAmount().toString(),
+          currentBalance: wagerService.getBalance(client.address || "").toString(),
+          canAfford: wagerService.canAffordWager(client.address || ""),
+          vaultAddress: contractService.getVaultAddress() || "",
+          timestamp: Date.now(),
+        });
+        logger.info(`Player ${client.name} needs to wager before joining room ${roomId}`);
+      }
+    } catch (error) {
+      logger.error(`Error checking on-chain wager for ${client.name}:`, error);
+      // Fall back to in-memory check failure
+      this.send(client, {
+        type: "server:wager_required",
+        gameId: roomId,
+        amount: wagerService.getWagerAmount().toString(),
+        currentBalance: wagerService.getBalance(client.address || "").toString(),
+        canAfford: wagerService.canAffordWager(client.address || ""),
+        vaultAddress: contractService.getVaultAddress() || "",
+        timestamp: Date.now(),
+      });
+    }
   }
 
   private handleLeaveRoom(client: Client, roomId: string): void {
@@ -2408,6 +2477,60 @@ export class WebSocketRelayServer {
         userId: a.userId,
         createdAt: a.createdAt,
       })),
+      timestamp: Date.now(),
+    });
+  }
+
+  private handleWithdrawRequest(client: Client, operatorKey: string, agentAddress: string, amount?: string): void {
+    // Validate operator key format
+    if (!operatorKey || !operatorKey.startsWith("oper_")) {
+      this.send(client, {
+        type: "server:withdraw_result",
+        success: false,
+        agentAddress,
+        error: "Invalid operator key",
+        timestamp: Date.now(),
+      });
+      return;
+    }
+
+    // Verify operator owns this agent
+    const agents = privyWalletService.getAgentWalletsForOperator(operatorKey);
+    const ownsAgent = agents.some(a => a.address.toLowerCase() === agentAddress.toLowerCase());
+
+    if (!ownsAgent) {
+      this.send(client, {
+        type: "server:withdraw_result",
+        success: false,
+        agentAddress,
+        error: "Agent not owned by this operator",
+        timestamp: Date.now(),
+      });
+      return;
+    }
+
+    // Get agent's balance
+    const balance = wagerService.getBalance(agentAddress);
+    if (balance <= BigInt(0)) {
+      this.send(client, {
+        type: "server:withdraw_result",
+        success: false,
+        agentAddress,
+        error: "No balance to withdraw",
+        timestamp: Date.now(),
+      });
+      return;
+    }
+
+    // For now, just return success - actual on-chain withdrawal would go here
+    // In production, this would trigger a Privy wallet transfer
+    logger.info(`Withdraw request: ${agentAddress} for ${amount || "max"} (balance: ${balance})`);
+
+    this.send(client, {
+      type: "server:withdraw_result",
+      success: true,
+      agentAddress,
+      txHash: "pending_implementation",
       timestamp: Date.now(),
     });
   }

@@ -159,6 +159,31 @@ export class WagerService {
   }
 
   /**
+   * Sync an on-chain wager to in-memory tracker
+   * Used when a wager is placed directly on-chain
+   */
+  syncOnChainWager(gameId: string, address: string): void {
+    const normalizedAddress = address.toLowerCase();
+
+    let gameWager = this.gameWagers.get(gameId);
+    if (!gameWager) {
+      gameWager = {
+        gameId,
+        wagers: new Map(),
+        totalPot: BigInt(0),
+        settled: false,
+      };
+      this.gameWagers.set(gameId, gameWager);
+    }
+
+    if (!gameWager.wagers.has(normalizedAddress)) {
+      gameWager.wagers.set(normalizedAddress, this.wagerAmount);
+      gameWager.totalPot += this.wagerAmount;
+      logger.info(`Synced on-chain wager for ${address} in game ${gameId}`);
+    }
+  }
+
+  /**
    * Get wager info for a game
    */
   getGameWager(gameId: string): GameWager | null {

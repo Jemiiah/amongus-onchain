@@ -146,6 +146,14 @@ export class ContractService {
     return this.enabled;
   }
 
+  /**
+   * Get WagerVault contract address
+   */
+  getVaultAddress(): string | null {
+    if (!this.enabled) return null;
+    return this.wagerVault.target as string;
+  }
+
   // ============ Utility Functions ============
 
   /**

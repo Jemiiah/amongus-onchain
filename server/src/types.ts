@@ -609,6 +609,7 @@ export interface ServerWagerRequiredMessage {
   amount: string;             // Required wager amount in wei
   currentBalance: string;     // Agent's current balance
   canAfford: boolean;         // Whether agent can afford the wager
+  vaultAddress?: string;      // WagerVault contract address for on-chain wagering
   timestamp: number;
 }
 
