@@ -92,9 +92,6 @@ export function MainMenu({ onPlay, isConnected, error, rooms = [], stats, leader
                 {isConnected ? "Live" : "Offline"}
               </span>
             </div>
-            <div className="px-4 py-2 bg-purple-600/80 rounded-lg border border-purple-400">
-              <span className="text-white font-bold">Monad Testnet</span>
-            </div>
           </motion.div>
         </div>
 
@@ -317,26 +314,24 @@ export function MainMenu({ onPlay, isConnected, error, rooms = [], stats, leader
                 return (
                   <div
                     key={slot.id}
-                    className={`px-4 py-3 rounded-xl border flex items-center gap-3 ${
-                      slot.state === "cooldown"
+                    className={`px-4 py-3 rounded-xl border flex items-center gap-3 ${slot.state === "cooldown"
                         ? "bg-orange-900/30 border-orange-700/50"
                         : room?.phase === "playing"
-                        ? "bg-red-900/30 border-red-700/50"
-                        : room?.phase === "lobby"
-                        ? "bg-green-900/30 border-green-700/50"
-                        : "bg-gray-800/30 border-gray-700/50"
-                    }`}
+                          ? "bg-red-900/30 border-red-700/50"
+                          : room?.phase === "lobby"
+                            ? "bg-green-900/30 border-green-700/50"
+                            : "bg-gray-800/30 border-gray-700/50"
+                      }`}
                   >
                     <div
-                      className={`w-3 h-3 rounded-full ${
-                        slot.state === "cooldown"
+                      className={`w-3 h-3 rounded-full ${slot.state === "cooldown"
                           ? "bg-orange-500"
                           : room?.phase === "playing"
-                          ? "bg-red-500 animate-pulse"
-                          : room?.phase === "lobby"
-                          ? "bg-green-500"
-                          : "bg-gray-500"
-                      }`}
+                            ? "bg-red-500 animate-pulse"
+                            : room?.phase === "lobby"
+                              ? "bg-green-500"
+                              : "bg-gray-500"
+                        }`}
                     />
                     <span className="text-white font-bold">Game {slot.id + 1}</span>
                     {slot.state === "cooldown" ? (
@@ -347,9 +342,8 @@ export function MainMenu({ onPlay, isConnected, error, rooms = [], stats, leader
                       <>
                         <span className="text-gray-400 text-sm">{room.players.length}/{room.maxPlayers}</span>
                         <span
-                          className={`text-xs px-2 py-0.5 rounded ${
-                            room.phase === "playing" ? "bg-red-600 text-white" : "bg-green-600 text-white"
-                          }`}
+                          className={`text-xs px-2 py-0.5 rounded ${room.phase === "playing" ? "bg-red-600 text-white" : "bg-green-600 text-white"
+                            }`}
                         >
                           {room.phase === "playing" ? "LIVE" : "WAITING"}
                         </span>
