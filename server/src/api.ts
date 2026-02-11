@@ -3,6 +3,7 @@ import cors from "cors";
 import crypto from "crypto";
 import { createLogger } from "./logger.js";
 import { privyWalletService } from "./PrivyWalletService.js";
+import { wagerService } from "./WagerService.js";
 import type { WebSocketRelayServer } from "./WebSocketServer.js";
 
 const logger = createLogger("api");
@@ -290,6 +291,107 @@ export function createApiServer(wsServer: WebSocketRelayServer) {
     });
   });
 
+  // ============ WAGER ENDPOINTS ============
+
+  // Get wager configuration
+  app.get("/api/wager/config", (_req: Request, res: Response) => {
+    res.json({
+      wagerAmount: wagerService.getWagerAmount().toString(),
+      wagerAmountMON: Number(wagerService.getWagerAmount()) / 1e18,
+      timestamp: Date.now(),
+    });
+  });
+
+  // Get agent balance
+  app.get("/api/wager/balance/:address", (req: Request<{ address: string }>, res: Response) => {
+    const { address } = req.params;
+
+    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+      res.status(400).json({ error: "Invalid wallet address format" });
+      return;
+    }
+
+    const balanceInfo = wagerService.getBalanceInfo(address);
+    const balance = wagerService.getBalance(address);
+
+    res.json({
+      address: address.toLowerCase(),
+      balance: balance.toString(),
+      balanceMON: Number(balance) / 1e18,
+      totalDeposited: balanceInfo?.totalDeposited.toString() || "0",
+      totalWon: balanceInfo?.totalWon.toString() || "0",
+      totalLost: balanceInfo?.totalLost.toString() || "0",
+      wagerAmount: wagerService.getWagerAmount().toString(),
+      canAffordWager: wagerService.canAffordWager(address),
+      timestamp: Date.now(),
+    });
+  });
+
+  // Deposit funds (for testing - in production this would be triggered by on-chain events)
+  app.post("/api/wager/deposit", (req: Request, res: Response) => {
+    const { address, amount } = req.body;
+
+    if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
+      res.status(400).json({ error: "Invalid wallet address" });
+      return;
+    }
+
+    if (!amount) {
+      res.status(400).json({ error: "Amount is required" });
+      return;
+    }
+
+    try {
+      const amountBigInt = BigInt(amount);
+      if (amountBigInt <= 0) {
+        res.status(400).json({ error: "Amount must be positive" });
+        return;
+      }
+
+      wagerService.deposit(address, amountBigInt);
+
+      const newBalance = wagerService.getBalance(address);
+
+      res.json({
+        success: true,
+        address: address.toLowerCase(),
+        deposited: amount,
+        newBalance: newBalance.toString(),
+        newBalanceMON: Number(newBalance) / 1e18,
+        timestamp: Date.now(),
+      });
+    } catch (error) {
+      res.status(400).json({ error: "Invalid amount format" });
+    }
+  });
+
+  // Get game pot info
+  app.get("/api/wager/game/:gameId", (req: Request<{ gameId: string }>, res: Response) => {
+    const { gameId } = req.params;
+
+    const gameWager = wagerService.getGameWager(gameId);
+
+    if (!gameWager) {
+      res.json({
+        gameId,
+        totalPot: "0",
+        playerCount: 0,
+        settled: false,
+        timestamp: Date.now(),
+      });
+      return;
+    }
+
+    res.json({
+      gameId,
+      totalPot: gameWager.totalPot.toString(),
+      totalPotMON: Number(gameWager.totalPot) / 1e18,
+      playerCount: gameWager.wagers.size,
+      settled: gameWager.settled,
+      timestamp: Date.now(),
+    });
+  });
+
   // ============ SERVER INFO ============
 
   // Get server configuration and status
@@ -300,6 +402,10 @@ export function createApiServer(wsServer: WebSocketRelayServer) {
       version: "1.0.0",
       privy: {
         enabled: privyWalletService.isEnabled(),
+      },
+      wager: {
+        amount: wagerService.getWagerAmount().toString(),
+        amountMON: Number(wagerService.getWagerAmount()) / 1e18,
       },
       limits: stats.limits,
       connections: stats.connections,

@@ -13,6 +13,7 @@ import type {
 import { createLogger } from "./logger.js";
 import { GameStateManager, WinConditionResult } from "./GameStateManager.js";
 import { privyWalletService } from "./PrivyWalletService.js";
+import { wagerService } from "./WagerService.js";
 
 const logger = createLogger("websocket-server");
 
@@ -218,11 +219,19 @@ export class WebSocketRelayServer {
     if (slot.roomId) {
       const room = this.rooms.get(slot.roomId);
       if (room) {
+        // Refund wagers if game hasn't ended (i.e., room closed before game started)
+        if (room.phase !== "ended") {
+          const refunded = wagerService.refundGame(slot.roomId);
+          if (refunded) {
+            logger.info(`Refunded wagers for cancelled room ${slot.roomId}`);
+          }
+        }
+
         // Notify players
         this.broadcastToRoom(slot.roomId, {
           type: "server:error",
           code: "ROOM_CLOSED",
-          message: "Room closed due to insufficient players",
+          message: "Room closed due to insufficient players. Wagers have been refunded.",
         });
 
         // Remove players from room
@@ -230,6 +239,14 @@ export class WebSocketRelayServer {
           const client = this.findClientByAddress(player.address);
           if (client) {
             client.roomId = undefined;
+            // Send updated balance after refund
+            this.send(client, {
+              type: "server:balance",
+              address: player.address,
+              balance: wagerService.getBalance(player.address).toString(),
+              wagerAmount: wagerService.getWagerAmount().toString(),
+              timestamp: Date.now(),
+            });
           }
         }
         for (const specId of room.spectators) {
@@ -421,7 +438,7 @@ export class WebSocketRelayServer {
 
       // Legacy agent messages (for backwards compat)
       case "agent:authenticate":
-        this.handleAuthenticate(client, message.address);
+        this.handleAgentAuthenticate(client, message.address, message.name, message.requestWallet);
         break;
 
       case "agent:join_game":
@@ -466,6 +483,19 @@ export class WebSocketRelayServer {
         this.handleListAgents(client, message.operatorKey);
         break;
 
+      // Wager messages
+      case "agent:deposit":
+        this.handleDeposit(client, message.amount);
+        break;
+
+      case "agent:submit_wager":
+        this.handleSubmitWager(client, message.gameId);
+        break;
+
+      case "agent:get_balance":
+        this.handleGetBalance(client);
+        break;
+
       default:
         logger.warn(`Unknown message type from ${client.id}`);
     }
@@ -481,6 +511,102 @@ export class WebSocketRelayServer {
     if (address) {
       this.getOrCreateAgentStats(address, client.name);
     }
+  }
+
+  /**
+   * Handle agent authentication with optional automatic wallet creation
+   */
+  private async handleAgentAuthenticate(
+    client: Client,
+    address?: string,
+    name?: string,
+    requestWallet?: boolean
+  ): Promise<void> {
+    // If agent already has an address, use normal authentication
+    if (address) {
+      this.handleAuthenticate(client, address, name);
+      this.send(client, {
+        type: "server:authenticated",
+        success: true,
+        address,
+        name: client.name || address.slice(0, 8),
+        isNewWallet: false,
+        timestamp: Date.now(),
+      });
+      return;
+    }
+
+    // If no address and requestWallet is true, create a new wallet
+    if (requestWallet) {
+      if (!privyWalletService.isEnabled()) {
+        this.send(client, {
+          type: "server:wallet_assigned",
+          success: false,
+          error: "Wallet creation service not available. Please provide your own wallet address.",
+          timestamp: Date.now(),
+        });
+        return;
+      }
+
+      try {
+        // Generate a unique identifier for this agent
+        const agentIdentifier = `auto_${client.id}_${Date.now()}`;
+
+        logger.info(`Creating automatic wallet for agent: ${name || client.id}`);
+
+        const result = await privyWalletService.createAgentWallet(agentIdentifier);
+
+        if (result) {
+          // Authenticate the client with the new wallet
+          client.address = result.address;
+          client.name = name || `Agent-${result.address.slice(0, 8)}`;
+          client.isAgent = true;
+
+          // Track in stats
+          this.getOrCreateAgentStats(result.address, client.name);
+
+          logger.info(`Auto-created wallet for agent ${client.name}: ${result.address}`);
+
+          // Send success response with the new wallet
+          this.send(client, {
+            type: "server:wallet_assigned",
+            success: true,
+            address: result.address,
+            userId: result.userId,
+            timestamp: Date.now(),
+          });
+
+          // Also send authenticated confirmation
+          this.send(client, {
+            type: "server:authenticated",
+            success: true,
+            address: result.address,
+            name: client.name,
+            isNewWallet: true,
+            timestamp: Date.now(),
+          });
+        } else {
+          this.send(client, {
+            type: "server:wallet_assigned",
+            success: false,
+            error: "Failed to create wallet. Please try again or provide your own wallet address.",
+            timestamp: Date.now(),
+          });
+        }
+      } catch (error) {
+        logger.error("Error creating automatic wallet:", error);
+        this.send(client, {
+          type: "server:wallet_assigned",
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error creating wallet",
+          timestamp: Date.now(),
+        });
+      }
+      return;
+    }
+
+    // No address and no wallet request - authenticate as spectator
+    this.handleAuthenticate(client, undefined, name);
   }
 
   private handleJoinRoom(client: Client, roomId: string, colorId?: number, asSpectator?: boolean): void {
@@ -512,6 +638,22 @@ export class WebSocketRelayServer {
         return;
       }
 
+      // Check if agent has wagered
+      if (!wagerService.hasWagered(roomId, client.address || "")) {
+        // Send wager required message
+        this.send(client, {
+          type: "server:wager_required",
+          gameId: roomId,
+          amount: wagerService.getWagerAmount().toString(),
+          currentBalance: wagerService.getBalance(client.address || "").toString(),
+          canAfford: wagerService.canAffordWager(client.address || ""),
+          timestamp: Date.now(),
+        });
+        // Don't add to room yet - they need to wager first
+        logger.info(`Player ${client.name} needs to wager before joining room ${roomId}`);
+        return;
+      }
+
       const playerState: PlayerState = {
         address: client.address || client.id,
         colorId: colorId ?? room.players.length,
@@ -523,7 +665,7 @@ export class WebSocketRelayServer {
       };
 
       room.players.push(playerState);
-      logger.info(`Player ${client.name} joined room ${roomId} (color: ${playerState.colorId})`);
+      logger.info(`Player ${client.name} joined room ${roomId} (color: ${playerState.colorId}, wagered)`);
 
       // Broadcast player joined to room
       this.broadcastToRoom(roomId, {
@@ -1150,6 +1292,24 @@ export class WebSocketRelayServer {
     // Record game stats for all players BEFORE changing phase
     this.recordGameEnd(roomId, crewmatesWon);
 
+    // Distribute wager winnings
+    const winners: string[] = [];
+    const losers: string[] = [];
+
+    for (const player of room.players) {
+      const isImpostor = extended?.impostors.has(player.address.toLowerCase()) ?? false;
+      const playerWon = (crewmatesWon && !isImpostor) || (!crewmatesWon && isImpostor);
+
+      if (playerWon) {
+        winners.push(player.address);
+      } else {
+        losers.push(player.address);
+      }
+    }
+
+    const wagerResult = wagerService.distributeWinnings(roomId, winners, losers);
+    const totalPot = wagerService.getGamePot(roomId);
+
     room.phase = "ended";
     if (extended) {
       extended.currentPhase = 7; // Ended
@@ -1158,15 +1318,34 @@ export class WebSocketRelayServer {
     // Find slot
     const slotId = extended?.slotId ?? this.roomSlots.findIndex(s => s.roomId === roomId);
 
+    // Broadcast game ended with wager info
     this.broadcastToRoom(roomId, {
       type: "server:game_ended",
       gameId: roomId,
       crewmatesWon,
       reason,
+      winners,
+      losers,
+      totalPot: totalPot.toString(),
+      winningsPerPlayer: wagerResult.winningsPerPlayer.toString(),
       timestamp: Date.now(),
     });
 
-    logger.info(`Game ended in room ${roomId}: ${crewmatesWon ? "Crewmates" : "Impostors"} win by ${reason}`);
+    // Send individual balance updates to each player
+    for (const player of room.players) {
+      const client = this.findClientByAddress(player.address);
+      if (client) {
+        this.send(client, {
+          type: "server:balance",
+          address: player.address,
+          balance: wagerService.getBalance(player.address).toString(),
+          wagerAmount: wagerService.getWagerAmount().toString(),
+          timestamp: Date.now(),
+        });
+      }
+    }
+
+    logger.info(`Game ended in room ${roomId}: ${crewmatesWon ? "Crewmates" : "Impostors"} win by ${reason}. Pot: ${totalPot.toString()} distributed to ${winners.length} winners.`);
 
     // Start cooldown for this slot after a short delay (let players see the end screen)
     setTimeout(() => {
@@ -1467,6 +1646,124 @@ export class WebSocketRelayServer {
         userId: a.userId,
         createdAt: a.createdAt,
       })),
+      timestamp: Date.now(),
+    });
+  }
+
+  // ============ WAGER HANDLERS ============
+
+  /**
+   * Handle deposit request
+   * In production, this would be triggered by on-chain deposit events
+   * For now, agents can self-deposit for testing
+   */
+  private handleDeposit(client: Client, amount: string): void {
+    if (!client.address) {
+      this.sendError(client, "NOT_AUTHENTICATED", "Must authenticate before depositing");
+      return;
+    }
+
+    try {
+      const amountBigInt = BigInt(amount);
+      if (amountBigInt <= 0) {
+        this.sendError(client, "INVALID_AMOUNT", "Deposit amount must be positive");
+        return;
+      }
+
+      wagerService.deposit(client.address, amountBigInt);
+
+      const balance = wagerService.getBalance(client.address);
+
+      this.send(client, {
+        type: "server:deposit_confirmed",
+        address: client.address,
+        amount: amount,
+        newBalance: balance.toString(),
+        timestamp: Date.now(),
+      });
+
+      logger.info(`Deposit confirmed for ${client.address}: ${amount} wei`);
+    } catch (error) {
+      this.sendError(client, "DEPOSIT_FAILED", "Invalid deposit amount");
+    }
+  }
+
+  /**
+   * Handle wager submission to join a game
+   */
+  private handleSubmitWager(client: Client, gameId: string): void {
+    if (!client.address) {
+      this.sendError(client, "NOT_AUTHENTICATED", "Must authenticate before wagering");
+      return;
+    }
+
+    const room = this.rooms.get(gameId);
+    if (!room) {
+      this.sendError(client, "ROOM_NOT_FOUND", `Room ${gameId} not found`);
+      return;
+    }
+
+    if (room.phase !== "lobby") {
+      this.sendError(client, "GAME_STARTED", "Cannot wager after game has started");
+      return;
+    }
+
+    // Submit wager
+    const result = wagerService.submitWager(gameId, client.address);
+
+    if (!result.success) {
+      this.send(client, {
+        type: "server:wager_failed",
+        gameId,
+        error: result.error || "Wager failed",
+        requiredAmount: wagerService.getWagerAmount().toString(),
+        currentBalance: wagerService.getBalance(client.address).toString(),
+        timestamp: Date.now(),
+      });
+      return;
+    }
+
+    // Wager accepted
+    this.send(client, {
+      type: "server:wager_accepted",
+      gameId,
+      amount: wagerService.getWagerAmount().toString(),
+      newBalance: wagerService.getBalance(client.address).toString(),
+      totalPot: wagerService.getGamePot(gameId).toString(),
+      timestamp: Date.now(),
+    });
+
+    // Broadcast updated pot to room
+    this.broadcastToRoom(gameId, {
+      type: "server:pot_updated",
+      gameId,
+      totalPot: wagerService.getGamePot(gameId).toString(),
+      playerCount: wagerService.getGameWager(gameId)?.wagers.size || 0,
+      timestamp: Date.now(),
+    });
+
+    logger.info(`Wager accepted for ${client.address} in game ${gameId}`);
+  }
+
+  /**
+   * Handle balance query
+   */
+  private handleGetBalance(client: Client): void {
+    if (!client.address) {
+      this.sendError(client, "NOT_AUTHENTICATED", "Must authenticate to check balance");
+      return;
+    }
+
+    const balanceInfo = wagerService.getBalanceInfo(client.address);
+
+    this.send(client, {
+      type: "server:balance",
+      address: client.address,
+      balance: wagerService.getBalance(client.address).toString(),
+      totalDeposited: balanceInfo?.totalDeposited.toString() || "0",
+      totalWon: balanceInfo?.totalWon.toString() || "0",
+      totalLost: balanceInfo?.totalLost.toString() || "0",
+      wagerAmount: wagerService.getWagerAmount().toString(),
       timestamp: Date.now(),
     });
   }

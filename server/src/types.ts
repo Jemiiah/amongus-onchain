@@ -132,7 +132,10 @@ export type ClientMessage =
   | AgentReportBodyMessage
   | OperatorWithdrawRequestMessage
   | OperatorCreateAgentMessage
-  | OperatorListAgentsMessage;
+  | OperatorListAgentsMessage
+  | AgentDepositMessage
+  | AgentSubmitWagerMessage
+  | AgentGetBalanceMessage;
 
 // Kept for backwards compat
 export type AgentMessage = ClientMessage;
@@ -169,7 +172,9 @@ export interface ClientStartGameMessage {
 // Legacy aliases
 export interface AgentAuthenticateMessage {
   type: "agent:authenticate";
-  address: string;
+  address?: string;           // Optional - if not provided and requestWallet is true, server creates one
+  name?: string;              // Agent display name
+  requestWallet?: boolean;    // If true, server will create a Privy wallet for this agent
   signature?: string;
 }
 
@@ -241,6 +246,22 @@ export interface AgentReportBodyMessage {
   round: number;
 }
 
+// ============ WAGER MESSAGES ============
+
+export interface AgentDepositMessage {
+  type: "agent:deposit";
+  amount: string; // Amount in wei as string
+}
+
+export interface AgentSubmitWagerMessage {
+  type: "agent:submit_wager";
+  gameId: string;
+}
+
+export interface AgentGetBalanceMessage {
+  type: "agent:get_balance";
+}
+
 // ============ OPERATOR MESSAGES ============
 
 export interface OperatorWithdrawRequestMessage {
@@ -293,7 +314,15 @@ export type ServerMessage =
   | ServerBodyReportedMessage
   | ServerWithdrawResultMessage
   | ServerAgentCreatedMessage
-  | ServerAgentListMessage;
+  | ServerAgentListMessage
+  | ServerWalletAssignedMessage
+  | ServerAuthenticatedMessage
+  | ServerBalanceMessage
+  | ServerWagerRequiredMessage
+  | ServerWagerAcceptedMessage
+  | ServerWagerFailedMessage
+  | ServerDepositConfirmedMessage
+  | ServerPotUpdatedMessage;
 
 export interface ServerWelcomeMessage {
   type: "server:welcome";
@@ -447,6 +476,10 @@ export interface ServerGameEndedMessage {
   gameId: string;
   crewmatesWon: boolean;
   reason: "tasks" | "votes" | "kills";
+  winners: string[];
+  losers: string[];
+  totalPot: string;
+  winningsPerPlayer: string;
   timestamp: number;
 }
 
@@ -485,6 +518,82 @@ export interface ServerAgentListMessage {
     userId: string;
     createdAt: number;
   }>;
+  timestamp: number;
+}
+
+export interface ServerWalletAssignedMessage {
+  type: "server:wallet_assigned";
+  success: boolean;
+  address?: string;           // The newly created wallet address
+  userId?: string;            // Privy user ID
+  error?: string;             // Error message if failed
+  timestamp: number;
+}
+
+export interface ServerAuthenticatedMessage {
+  type: "server:authenticated";
+  success: boolean;
+  address: string;            // The authenticated wallet address
+  name: string;               // Display name
+  isNewWallet: boolean;       // True if wallet was just created
+  timestamp: number;
+}
+
+// ============ SERVER WAGER MESSAGES ============
+
+export interface ServerBalanceMessage {
+  type: "server:balance";
+  address: string;
+  balance: string;            // Balance in wei as string
+  totalDeposited?: string;
+  totalWon?: string;
+  totalLost?: string;
+  wagerAmount?: string;       // Required wager amount
+  canAfford?: boolean;        // Whether agent can afford the wager
+  timestamp: number;
+}
+
+export interface ServerWagerRequiredMessage {
+  type: "server:wager_required";
+  gameId: string;
+  amount: string;             // Required wager amount in wei
+  currentBalance: string;     // Agent's current balance
+  canAfford: boolean;         // Whether agent can afford the wager
+  timestamp: number;
+}
+
+export interface ServerWagerAcceptedMessage {
+  type: "server:wager_accepted";
+  gameId: string;
+  amount: string;             // Amount wagered
+  newBalance: string;         // Balance after wager
+  totalPot: string;           // Total pot for the game
+  timestamp: number;
+}
+
+export interface ServerWagerFailedMessage {
+  type: "server:wager_failed";
+  gameId: string;
+  reason?: string;
+  error?: string;             // Detailed error message
+  requiredAmount: string;
+  currentBalance: string;
+  timestamp: number;
+}
+
+export interface ServerDepositConfirmedMessage {
+  type: "server:deposit_confirmed";
+  address: string;
+  amount: string;
+  newBalance: string;
+  timestamp: number;
+}
+
+export interface ServerPotUpdatedMessage {
+  type: "server:pot_updated";
+  gameId: string;
+  totalPot: string;
+  playerCount: number;
   timestamp: number;
 }
 
