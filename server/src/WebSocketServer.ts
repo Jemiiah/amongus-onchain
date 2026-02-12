@@ -1,4 +1,5 @@
 import { WebSocketServer as WSServer, WebSocket } from "ws";
+import type { Server as HttpServer } from "http";
 import { v4 as uuidv4 } from "uuid";
 import type {
   ClientMessage,
@@ -117,6 +118,27 @@ export class WebSocketRelayServer {
     this.wss.on("error", (error) => {
       logger.error(`Server error: ${error}`);
     });
+  }
+
+  /**
+   * Attach WebSocket to an existing HTTP server (share same port).
+   * Use this for platforms like Render that only expose a single port.
+   */
+  attachToServer(httpServer: HttpServer): void {
+    this.wss = new WSServer({ server: httpServer });
+
+    logger.info("WebSocket server attached to HTTP server (shared port)");
+
+    this.wss.on("connection", (ws, req) => {
+      this.handleConnection(ws);
+    });
+
+    this.wss.on("error", (error) => {
+      logger.error(`Server error: ${error}`);
+    });
+
+    // Initialize room slots immediately since we're sharing the HTTP listener
+    this.initializeRoomSlots();
   }
 
   // ============ AUTOMATIC ROOM MANAGEMENT ============
