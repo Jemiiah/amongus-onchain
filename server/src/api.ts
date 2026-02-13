@@ -318,7 +318,29 @@ export function createApiServer(wsServer: WebSocketRelayServer) {
     });
   });
 
-  // Get agent balance
+  // Get agent wallet balance (native MON)
+  app.get(
+    "/api/agents/:address/balance",
+    async (req: Request<{ address: string }>, res: Response) => {
+      const { address } = req.params;
+
+      if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+        res.status(400).json({ error: "Invalid wallet address format" });
+        return;
+      }
+
+      const balance = await wagerService.getWalletBalance(address);
+
+      res.json({
+        address: address.toLowerCase(),
+        balance: balance.toString(),
+        balanceMON: Number(balance) / 1e18,
+        timestamp: Date.now(),
+      });
+    },
+  );
+
+  // Get agent wager balance
   app.get(
     "/api/wager/balance/:address",
     async (req: Request<{ address: string }>, res: Response) => {

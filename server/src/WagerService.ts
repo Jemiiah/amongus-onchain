@@ -68,13 +68,20 @@ export class WagerService {
   }
 
   /**
-   * Get agent's current balance from on-chain
+   * Get agent's current balance from on-chain (wager balance)
    * This is the source of truth for balances
    */
   async getBalance(address: string): Promise<bigint> {
     // Query on-chain balance (source of truth)
     const onChainBalance = await contractService.getBalance(address);
     return onChainBalance;
+  }
+
+  /**
+   * Get agent's actual wallet balance (native MON)
+   */
+  async getWalletBalance(address: string): Promise<bigint> {
+    return await contractService.getWalletBalance(address);
   }
 
   /**

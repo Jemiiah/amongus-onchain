@@ -196,7 +196,7 @@ export class ContractService {
   // ============ WagerVault Functions ============
 
   /**
-   * Get agent's on-chain balance
+   * Get agent's on-chain balance (wager balance)
    */
   async getBalance(agentAddress: string): Promise<bigint> {
     if (!this.enabled) return BigInt(0);
@@ -206,6 +206,21 @@ export class ContractService {
       return BigInt(balance.toString());
     } catch (error) {
       logger.error(`Failed to get balance for ${agentAddress}:`, error);
+      return BigInt(0);
+    }
+  }
+
+  /**
+   * Get agent's actual wallet balance (native MON)
+   */
+  async getWalletBalance(agentAddress: string): Promise<bigint> {
+    if (!this.enabled) return BigInt(0);
+
+    try {
+      const balance = await this.provider.getBalance(agentAddress);
+      return BigInt(balance.toString());
+    } catch (error) {
+      logger.error(`Failed to get wallet balance for ${agentAddress}:`, error);
       return BigInt(0);
     }
   }
