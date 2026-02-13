@@ -334,11 +334,20 @@ export class ContractService {
           ethers.MaxUint256
         ]);
 
-        await privyWalletService.sendTransaction(
+        const approveHash = await privyWalletService.sendTransaction(
           agentAddress,
           this.monadTokenAddress,
           approveData
         );
+
+        if (approveHash) {
+          logger.info(`Waiting for approve transaction confirmation: ${approveHash}`);
+          await this.provider.waitForTransaction(approveHash);
+          logger.info("Approve transaction confirmed");
+        } else {
+          logger.error("Failed to send approve transaction");
+          return null;
+        }
       }
 
       logger.info(`Depositing ${amount} tokens into WagerVault for ${agentAddress}`);
