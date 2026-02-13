@@ -2880,7 +2880,7 @@ export class WebSocketRelayServer {
     }
   }
 
-  private handleListAgents(client: Client, operatorKey: string): void {
+  private async handleListAgents(client: Client, operatorKey: string): Promise<void> {
     // Validate operator key format
     if (!operatorKey || !operatorKey.startsWith("oper_")) {
       this.send(client, {
@@ -2891,7 +2891,7 @@ export class WebSocketRelayServer {
       return;
     }
 
-    const agents = privyWalletService.getAgentWalletsForOperator(operatorKey);
+    const agents = await privyWalletService.getAgentWalletsForOperator(operatorKey);
 
     this.send(client, {
       type: "server:agent_list",
@@ -2923,7 +2923,7 @@ export class WebSocketRelayServer {
     }
 
     // Verify operator owns this agent
-    const agents = privyWalletService.getAgentWalletsForOperator(operatorKey);
+    const agents = await privyWalletService.getAgentWalletsForOperator(operatorKey);
     const ownsAgent = agents.some(
       (a) => a.address.toLowerCase() === agentAddress.toLowerCase(),
     );

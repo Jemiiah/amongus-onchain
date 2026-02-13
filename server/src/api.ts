@@ -5,50 +5,47 @@ import { privyWalletService } from "./PrivyWalletService.js";
 import { wagerService } from "./WagerService.js";
 import type { WebSocketRelayServer } from "./WebSocketServer.js";
 
+import { databaseService } from "./DatabaseService.js";
+import { Operator } from "@prisma/client";
+
 const logger = createLogger("api");
 
 // ============ OPERATOR KEY STORAGE ============
+// Use databaseService for operator storage.
+// This replaces the previous in-memory registeredOperators Map.
 
-interface RegisteredOperator {
-  operatorKey: string; // The key itself (hashed for comparison)
-  walletAddress: string;
-  createdAt: number;
-}
-
-// In-memory storage (in production, use a database)
-// Maps operator key -> operator info
-const registeredOperators = new Map<string, RegisteredOperator>();
-
-function registerOperatorKey(
+async function registerOperatorKey(
   operatorKey: string,
   walletAddress: string,
-): boolean {
+): Promise<boolean> {
   // Operator key must start with "oper_"
   if (!operatorKey.startsWith("oper_")) {
     return false;
   }
 
   // Check if key already exists
-  if (registeredOperators.has(operatorKey)) {
+  const existing = await databaseService.getOperatorByKey(operatorKey);
+  if (existing) {
     return false;
   }
 
   const normalizedAddress = walletAddress.toLowerCase();
-  const entry: RegisteredOperator = {
+
+  // Persist to database
+  databaseService.upsertOperator({
+    name: `Operator ${normalizedAddress.slice(0, 10)}`,
     operatorKey,
     walletAddress: normalizedAddress,
-    createdAt: Date.now(),
-  };
+  });
 
-  registeredOperators.set(operatorKey, entry);
   logger.info(
-    `Registered operator key for ${normalizedAddress.slice(0, 10)}...`,
+    `Registered operator key for ${normalizedAddress.slice(0, 10)}... (persisted to DB)`,
   );
   return true;
 }
 
-function validateOperatorKey(operatorKey: string): RegisteredOperator | null {
-  return registeredOperators.get(operatorKey) || null;
+async function validateOperatorKey(operatorKey: string) {
+  return await databaseService.getOperatorByKey(operatorKey);
 }
 
 // Extract Bearer token from Authorization header
@@ -62,10 +59,10 @@ function extractBearerToken(req: Request): string | null {
 
 // Middleware to require operator authentication
 interface AuthenticatedRequest extends Request {
-  operator?: RegisteredOperator;
+  operator?: Operator;
 }
 
-function requireOperatorAuth(
+async function requireOperatorAuth(
   req: AuthenticatedRequest,
   res: Response,
   next: NextFunction,
@@ -80,13 +77,13 @@ function requireOperatorAuth(
     return;
   }
 
-  const operator = validateOperatorKey(operatorKey);
+  const operator = await validateOperatorKey(operatorKey);
   if (!operator) {
     res.status(401).json({ error: "Invalid operator key" });
     return;
   }
 
-  req.operator = operator;
+  req.operator = operator as any;
   next();
 }
 
@@ -186,7 +183,7 @@ export function createApiServer(wsServer: WebSocketRelayServer) {
 
   // Register an operator key (user provides their own key)
   // The operator key is passed in Authorization header, wallet address in body
-  app.post("/api/operators", (req: Request, res: Response) => {
+  app.post("/api/operators", async (req: Request, res: Response) => {
     const operatorKey = extractBearerToken(req);
     const { walletAddress } = req.body;
 
@@ -215,7 +212,7 @@ export function createApiServer(wsServer: WebSocketRelayServer) {
       return;
     }
 
-    const success = registerOperatorKey(operatorKey, walletAddress);
+    const success = await registerOperatorKey(operatorKey, walletAddress);
 
     if (!success) {
       res.status(409).json({ error: "Operator key already registered" });
@@ -232,8 +229,8 @@ export function createApiServer(wsServer: WebSocketRelayServer) {
   // Validate operator key (check if authenticated)
   app.get(
     "/api/operators/me",
-    (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-      requireOperatorAuth(req, res, () => {
+    async (req: AuthenticatedRequest, res: Response) => {
+      await requireOperatorAuth(req, res, () => {
         res.json({
           valid: true,
           walletAddress: req.operator!.walletAddress,
@@ -290,10 +287,10 @@ export function createApiServer(wsServer: WebSocketRelayServer) {
   app.get(
     "/api/agents",
     (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-      requireOperatorAuth(req, res, () => {
+      requireOperatorAuth(req, res, async () => {
         const operatorKey = extractBearerToken(req)!;
         const agents =
-          privyWalletService.getAgentWalletsForOperator(operatorKey);
+          await privyWalletService.getAgentWalletsForOperator(operatorKey);
 
         res.json({
           agents: agents.map((a) => ({
