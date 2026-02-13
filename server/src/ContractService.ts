@@ -50,6 +50,7 @@ const ERC20_ABI = [
 
 interface ContractConfig {
   rpcUrl: string;
+  networkMode: "testnet" | "mainnet";
   wagerVaultAddress: string;
   agentRegistryAddress: string;
   gameSettlementAddress: string;
@@ -68,45 +69,55 @@ export class ContractService {
   private gameSettlement!: ethers.Contract;
   private monadToken!: ethers.Contract;
   private enabled: boolean = false;
+  private networkMode: "testnet" | "mainnet" = "testnet";
 
   constructor() {
     const config = this.getConfig();
 
     if (!config) {
-      logger.warn("Contract service not configured - running in off-chain mode");
+      logger.warn(
+        "Contract service not configured - running in off-chain mode",
+      );
       return;
     }
 
+    this.networkMode = config.networkMode;
+
     try {
       this.provider = new ethers.JsonRpcProvider(config.rpcUrl);
-      this.operatorWallet = new ethers.Wallet(config.operatorPrivateKey, this.provider);
+      this.operatorWallet = new ethers.Wallet(
+        config.operatorPrivateKey,
+        this.provider,
+      );
 
       this.wagerVault = new ethers.Contract(
         config.wagerVaultAddress,
         WAGER_VAULT_ABI,
-        this.operatorWallet
+        this.operatorWallet,
       );
 
       this.agentRegistry = new ethers.Contract(
         config.agentRegistryAddress,
         AGENT_REGISTRY_ABI,
-        this.operatorWallet
+        this.operatorWallet,
       );
 
       this.gameSettlement = new ethers.Contract(
         config.gameSettlementAddress,
         GAME_SETTLEMENT_ABI,
-        this.operatorWallet
+        this.operatorWallet,
       );
 
       this.monadToken = new ethers.Contract(
         config.monadTokenAddress,
         ERC20_ABI,
-        this.operatorWallet
+        this.operatorWallet,
       );
 
       this.enabled = true;
       logger.info("Contract service initialized successfully");
+      logger.info(`Network mode: ${this.networkMode}`);
+      logger.info(`RPC URL: ${config.rpcUrl}`);
       logger.info(`Operator address: ${this.operatorWallet.address}`);
     } catch (error) {
       logger.error("Failed to initialize contract service:", error);
@@ -114,7 +125,25 @@ export class ContractService {
   }
 
   private getConfig(): ContractConfig | null {
-    const rpcUrl = process.env.MONAD_RPC_URL;
+    // Determine network mode
+    const networkMode = (process.env.NETWORK_MODE?.toLowerCase() ||
+      "testnet") as "testnet" | "mainnet";
+
+    // Validate network mode
+    if (networkMode !== "testnet" && networkMode !== "mainnet") {
+      logger.error(
+        `Invalid NETWORK_MODE: ${process.env.NETWORK_MODE}. Must be 'testnet' or 'mainnet'. Defaulting to testnet.`,
+      );
+    }
+
+    // Select RPC URL based on network mode
+    let rpcUrl: string | undefined;
+    if (networkMode === "testnet") {
+      rpcUrl = process.env.TESTNET_RPC_URL || process.env.MONAD_RPC_URL;
+    } else {
+      rpcUrl = process.env.MAINNET_RPC_URL;
+    }
+
     const wagerVaultAddress = process.env.WAGER_VAULT_ADDRESS;
     const agentRegistryAddress = process.env.AGENT_REGISTRY_ADDRESS;
     const gameSettlementAddress = process.env.GAME_SETTLEMENT_ADDRESS;
@@ -134,6 +163,7 @@ export class ContractService {
 
     return {
       rpcUrl,
+      networkMode,
       wagerVaultAddress,
       agentRegistryAddress,
       gameSettlementAddress,
@@ -274,7 +304,9 @@ export class ContractService {
   /**
    * Get leaderboard from on-chain registry
    */
-  async getLeaderboard(limit: number = 10): Promise<Array<{ address: string; wins: number }>> {
+  async getLeaderboard(
+    limit: number = 10,
+  ): Promise<Array<{ address: string; wins: number }>> {
     if (!this.enabled) return [];
 
     try {
@@ -297,7 +329,7 @@ export class ContractService {
   async createGame(
     roomId: string,
     players: string[],
-    impostors: string[]
+    impostors: string[],
   ): Promise<boolean> {
     if (!this.enabled) {
       logger.warn("Contract service disabled - skipping createGame");
@@ -311,7 +343,11 @@ export class ContractService {
       logger.info(`Players: ${players.join(", ")}`);
       logger.info(`Impostors: ${impostors.join(", ")}`);
 
-      const tx = await this.gameSettlement.createGame(gameId, players, impostors);
+      const tx = await this.gameSettlement.createGame(
+        gameId,
+        players,
+        impostors,
+      );
       const receipt = await tx.wait();
 
       logger.info(`Game created on-chain. TX: ${receipt.hash}`);
@@ -331,7 +367,7 @@ export class ContractService {
     winners: string[],
     playerAddresses: string[],
     playerKills: number[],
-    playerTasks: number[]
+    playerTasks: number[],
   ): Promise<boolean> {
     if (!this.enabled) {
       logger.warn("Contract service disabled - skipping settleGame");
@@ -349,8 +385,8 @@ export class ContractService {
         gameId,
         crewmatesWon,
         winners,
-        playerKills.map(k => BigInt(k)),
-        playerTasks.map(t => BigInt(t))
+        playerKills.map((k) => BigInt(k)),
+        playerTasks.map((t) => BigInt(t)),
       );
       const receipt = await tx.wait();
 
@@ -409,23 +445,37 @@ export class ContractService {
   /**
    * Listen for deposit events
    */
-  onDeposit(callback: (agent: string, amount: bigint, newBalance: bigint) => void): void {
+  onDeposit(
+    callback: (agent: string, amount: bigint, newBalance: bigint) => void,
+  ): void {
     if (!this.enabled) return;
 
-    this.wagerVault.on("Deposited", (agent: string, amount: bigint, newBalance: bigint) => {
-      callback(agent, BigInt(amount.toString()), BigInt(newBalance.toString()));
-    });
+    this.wagerVault.on(
+      "Deposited",
+      (agent: string, amount: bigint, newBalance: bigint) => {
+        callback(
+          agent,
+          BigInt(amount.toString()),
+          BigInt(newBalance.toString()),
+        );
+      },
+    );
   }
 
   /**
    * Listen for wager placed events
    */
-  onWagerPlaced(callback: (gameId: string, agent: string, amount: bigint) => void): void {
+  onWagerPlaced(
+    callback: (gameId: string, agent: string, amount: bigint) => void,
+  ): void {
     if (!this.enabled) return;
 
-    this.wagerVault.on("WagerPlaced", (gameId: string, agent: string, amount: bigint) => {
-      callback(gameId, agent, BigInt(amount.toString()));
-    });
+    this.wagerVault.on(
+      "WagerPlaced",
+      (gameId: string, agent: string, amount: bigint) => {
+        callback(gameId, agent, BigInt(amount.toString()));
+      },
+    );
   }
 
   /**

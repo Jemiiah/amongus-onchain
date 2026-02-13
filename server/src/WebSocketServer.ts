@@ -106,7 +106,9 @@ export class WebSocketRelayServer {
     });
 
     this.wss.on("listening", () => {
-      logger.info(`WebSocket server listening on ${this.config.host || "0.0.0.0"}:${this.config.port}`);
+      logger.info(
+        `WebSocket server listening on ${this.config.host || "0.0.0.0"}:${this.config.port}`,
+      );
       // Auto-create rooms for all slots on server start
       this.initializeRoomSlots();
     });
@@ -198,7 +200,9 @@ export class WebSocketRelayServer {
     if (!room || room.phase !== "lobby") return;
 
     if (room.players.length < MIN_PLAYERS_TO_START) {
-      logger.info(`Room ${slot.roomId} has ${room.players.length} players (need ${MIN_PLAYERS_TO_START}), deleting and starting cooldown`);
+      logger.info(
+        `Room ${slot.roomId} has ${room.players.length} players (need ${MIN_PLAYERS_TO_START}), deleting and starting cooldown`,
+      );
       this.deleteRoomAndCooldown(slotId);
     }
   }
@@ -207,7 +211,9 @@ export class WebSocketRelayServer {
     const slot = this.roomSlots[slotId];
     if (!slot || slot.fillTimer) return;
 
-    logger.info(`Starting fill timer for slot ${slotId} (${FILL_WAIT_DURATION / 1000}s to reach max players)`);
+    logger.info(
+      `Starting fill timer for slot ${slotId} (${FILL_WAIT_DURATION / 1000}s to reach max players)`,
+    );
 
     slot.fillTimer = setTimeout(() => {
       this.onFillTimerExpired(slotId);
@@ -224,12 +230,14 @@ export class WebSocketRelayServer {
     slot.fillTimer = null;
 
     if (room.players.length >= MIN_PLAYERS_TO_START) {
-      logger.info(`Fill timer expired for slot ${slotId}, starting game with ${room.players.length} players`);
+      logger.info(
+        `Fill timer expired for slot ${slotId}, starting game with ${room.players.length} players`,
+      );
       this.autoStartGame(slot.roomId);
     }
   }
 
-  private deleteRoomAndCooldown(slotId: number): void {
+  private async deleteRoomAndCooldown(slotId: number): Promise<void> {
     const slot = this.roomSlots[slotId];
     if (!slot) return;
 
@@ -257,16 +265,24 @@ export class WebSocketRelayServer {
           // Cancel game on-chain if it was playing
           if (room.phase === "playing") {
             const roomIdToCancel = slot.roomId;
-            contractService.cancelGame(roomIdToCancel)
-              .then(success => {
+            contractService
+              .cancelGame(roomIdToCancel)
+              .then((success) => {
                 if (success) {
-                  logger.info(`Game ${roomIdToCancel} cancelled on-chain successfully`);
+                  logger.info(
+                    `Game ${roomIdToCancel} cancelled on-chain successfully`,
+                  );
                 } else {
-                  logger.warn(`Failed to cancel game ${roomIdToCancel} on-chain`);
+                  logger.warn(
+                    `Failed to cancel game ${roomIdToCancel} on-chain`,
+                  );
                 }
               })
-              .catch(err => {
-                logger.error(`Error cancelling game ${roomIdToCancel} on-chain:`, err);
+              .catch((err) => {
+                logger.error(
+                  `Error cancelling game ${roomIdToCancel} on-chain:`,
+                  err,
+                );
               });
           }
         }
@@ -275,7 +291,8 @@ export class WebSocketRelayServer {
         this.broadcastToRoom(slot.roomId, {
           type: "server:error",
           code: "ROOM_CLOSED",
-          message: "Room closed due to insufficient players. Wagers have been refunded.",
+          message:
+            "Room closed due to insufficient players. Wagers have been refunded.",
         });
 
         // Remove players from room
@@ -284,10 +301,11 @@ export class WebSocketRelayServer {
           if (client) {
             client.roomId = undefined;
             // Send updated balance after refund
+            const balance = await wagerService.getBalance(player.address);
             this.send(client, {
               type: "server:balance",
               address: player.address,
-              balance: wagerService.getBalance(player.address).toString(),
+              balance: balance.toString(),
               wagerAmount: wagerService.getWagerAmount().toString(),
               timestamp: Date.now(),
             });
@@ -310,7 +328,9 @@ export class WebSocketRelayServer {
     slot.roomId = null;
     slot.cooldownEndTime = Date.now() + COOLDOWN_DURATION;
 
-    logger.info(`Slot ${slotId} entering cooldown until ${new Date(slot.cooldownEndTime).toISOString()}`);
+    logger.info(
+      `Slot ${slotId} entering cooldown until ${new Date(slot.cooldownEndTime).toISOString()}`,
+    );
 
     this.broadcastRoomList();
 
@@ -335,7 +355,7 @@ export class WebSocketRelayServer {
     if (!room || room.phase !== "lobby") return;
 
     // Find slot for this room
-    const slot = this.roomSlots.find(s => s.roomId === roomId);
+    const slot = this.roomSlots.find((s) => s.roomId === roomId);
     if (!slot) return;
 
     // Clear min players timer since we have activity
@@ -347,7 +367,9 @@ export class WebSocketRelayServer {
     // Check if we should start the game
     if (room.players.length >= MAX_PLAYERS_PER_ROOM) {
       // Room is full, start immediately
-      logger.info(`Room ${roomId} is full (${room.players.length} players), starting game`);
+      logger.info(
+        `Room ${roomId} is full (${room.players.length} players), starting game`,
+      );
       if (slot.fillTimer) {
         clearTimeout(slot.fillTimer);
         slot.fillTimer = null;
@@ -371,12 +393,14 @@ export class WebSocketRelayServer {
     if (!room || room.phase !== "lobby") return;
 
     if (room.players.length < MIN_PLAYERS_TO_START) {
-      logger.warn(`Cannot auto-start ${roomId}: only ${room.players.length} players (need ${MIN_PLAYERS_TO_START})`);
+      logger.warn(
+        `Cannot auto-start ${roomId}: only ${room.players.length} players (need ${MIN_PLAYERS_TO_START})`,
+      );
       return;
     }
 
     // Find and clear slot timers
-    const slot = this.roomSlots.find(s => s.roomId === roomId);
+    const slot = this.roomSlots.find((s) => s.roomId === roomId);
     if (slot) {
       if (slot.fillTimer) {
         clearTimeout(slot.fillTimer);
@@ -453,7 +477,10 @@ export class WebSocketRelayServer {
     });
   }
 
-  private handleMessage(client: Client, message: ClientMessage): void {
+  private async handleMessage(
+    client: Client,
+    message: ClientMessage,
+  ): Promise<void> {
     logger.debug(`Message from ${client.id}: ${message.type}`);
 
     switch (message.type) {
@@ -464,11 +491,20 @@ export class WebSocketRelayServer {
 
       case "client:create_room":
         // Manual room creation disabled - server manages rooms automatically
-        this.sendError(client, "MANUAL_CREATION_DISABLED", "Rooms are created automatically by the server");
+        this.sendError(
+          client,
+          "MANUAL_CREATION_DISABLED",
+          "Rooms are created automatically by the server",
+        );
         break;
 
       case "client:join_room":
-        this.handleJoinRoom(client, message.roomId, message.colorId, message.asSpectator);
+        await this.handleJoinRoom(
+          client,
+          message.roomId,
+          message.colorId,
+          message.asSpectator,
+        );
         break;
 
       case "client:leave_room":
@@ -477,16 +513,30 @@ export class WebSocketRelayServer {
 
       case "client:start_game":
         // Manual game start disabled - games start automatically
-        this.sendError(client, "MANUAL_START_DISABLED", "Games start automatically when enough players join");
+        this.sendError(
+          client,
+          "MANUAL_START_DISABLED",
+          "Games start automatically when enough players join",
+        );
         break;
 
       // Legacy agent messages (for backwards compat)
       case "agent:authenticate":
-        this.handleAgentAuthenticate(client, message.address, message.name, message.requestWallet);
+        this.handleAgentAuthenticate(
+          client,
+          message.address,
+          message.name,
+          message.requestWallet,
+        );
         break;
 
       case "agent:join_game":
-        this.handleJoinRoom(client, message.gameId, message.colorId, false);
+        await this.handleJoinRoom(
+          client,
+          message.gameId,
+          message.colorId,
+          false,
+        );
         break;
 
       case "agent:leave_game":
@@ -495,27 +545,63 @@ export class WebSocketRelayServer {
 
       // Game action messages
       case "agent:position_update":
-        this.handlePositionUpdate(client, message.gameId, message.location, message.round);
+        this.handlePositionUpdate(
+          client,
+          message.gameId,
+          message.location,
+          message.round,
+        );
         break;
 
       case "agent:kill":
-        this.handleKill(client, message.gameId, message.killer, message.victim, message.location, message.round);
+        await this.handleKill(
+          client,
+          message.gameId,
+          message.killer,
+          message.victim,
+          message.location,
+          message.round,
+        );
         break;
 
       case "agent:vote":
-        this.handleVote(client, message.gameId, message.voter, message.target, message.round);
+        this.handleVote(
+          client,
+          message.gameId,
+          message.voter,
+          message.target,
+          message.round,
+        );
         break;
 
       case "agent:task_complete":
-        this.handleTaskComplete(client, message.gameId, message.player, message.tasksCompleted, message.totalTasks);
+        await this.handleTaskComplete(
+          client,
+          message.gameId,
+          message.player,
+          message.tasksCompleted,
+          message.totalTasks,
+        );
         break;
 
       case "agent:phase_change":
-        this.handlePhaseChange(client, message.gameId, message.phase, message.round, message.phaseEndTime);
+        this.handlePhaseChange(
+          client,
+          message.gameId,
+          message.phase,
+          message.round,
+          message.phaseEndTime,
+        );
         break;
 
       case "agent:report_body":
-        this.handleReportBody(client, message.gameId, message.reporter, message.bodyLocation, message.round);
+        this.handleReportBody(
+          client,
+          message.gameId,
+          message.reporter,
+          message.bodyLocation,
+          message.round,
+        );
         break;
 
       // Operator messages
@@ -528,20 +614,25 @@ export class WebSocketRelayServer {
         break;
 
       case "operator:withdraw_request":
-        this.handleWithdrawRequest(client, message.operatorKey, message.agentAddress, message.amount);
+        await this.handleWithdrawRequest(
+          client,
+          message.operatorKey,
+          message.agentAddress,
+          message.amount,
+        );
         break;
 
       // Wager messages
       case "agent:deposit":
-        this.handleDeposit(client, message.amount);
+        await this.handleDeposit(client, message.amount);
         break;
 
       case "agent:submit_wager":
-        this.handleSubmitWager(client, message.gameId);
+        await this.handleSubmitWager(client, message.gameId);
         break;
 
       case "agent:get_balance":
-        this.handleGetBalance(client);
+        await this.handleGetBalance(client);
         break;
 
       case "agent:call_meeting":
@@ -561,7 +652,12 @@ export class WebSocketRelayServer {
         break;
 
       case "agent:vent":
-        this.handleVent(client, message.gameId, message.action, message.targetLocation);
+        this.handleVent(
+          client,
+          message.gameId,
+          message.action,
+          message.targetLocation,
+        );
         break;
 
       case "agent:use_cameras":
@@ -573,11 +669,18 @@ export class WebSocketRelayServer {
     }
   }
 
-  private handleAuthenticate(client: Client, address?: string, name?: string): void {
+  private handleAuthenticate(
+    client: Client,
+    address?: string,
+    name?: string,
+  ): void {
     client.address = address;
-    client.name = name || address?.slice(0, 8) || `Client-${client.id.slice(0, 6)}`;
+    client.name =
+      name || address?.slice(0, 8) || `Client-${client.id.slice(0, 6)}`;
     client.isAgent = !!address;
-    logger.info(`Client ${client.id} authenticated as ${client.name} (agent: ${client.isAgent})`);
+    logger.info(
+      `Client ${client.id} authenticated as ${client.name} (agent: ${client.isAgent})`,
+    );
 
     // Track agent in stats
     if (address) {
@@ -592,7 +695,7 @@ export class WebSocketRelayServer {
     client: Client,
     address?: string,
     name?: string,
-    requestWallet?: boolean
+    requestWallet?: boolean,
   ): Promise<void> {
     // If agent already has an address, use normal authentication
     if (address) {
@@ -614,7 +717,8 @@ export class WebSocketRelayServer {
         this.send(client, {
           type: "server:wallet_assigned",
           success: false,
-          error: "Wallet creation service not available. Please provide your own wallet address.",
+          error:
+            "Wallet creation service not available. Please provide your own wallet address.",
           timestamp: Date.now(),
         });
         return;
@@ -624,9 +728,12 @@ export class WebSocketRelayServer {
         // Generate a unique identifier for this agent
         const agentIdentifier = `auto_${client.id}_${Date.now()}`;
 
-        logger.info(`Creating automatic wallet for agent: ${name || client.id}`);
+        logger.info(
+          `Creating automatic wallet for agent: ${name || client.id}`,
+        );
 
-        const result = await privyWalletService.createAgentWallet(agentIdentifier);
+        const result =
+          await privyWalletService.createAgentWallet(agentIdentifier);
 
         if (result) {
           // Authenticate the client with the new wallet
@@ -637,7 +744,9 @@ export class WebSocketRelayServer {
           // Track in stats
           this.getOrCreateAgentStats(result.address, client.name);
 
-          logger.info(`Auto-created wallet for agent ${client.name}: ${result.address}`);
+          logger.info(
+            `Auto-created wallet for agent ${client.name}: ${result.address}`,
+          );
 
           // Send success response with the new wallet
           this.send(client, {
@@ -661,7 +770,8 @@ export class WebSocketRelayServer {
           this.send(client, {
             type: "server:wallet_assigned",
             success: false,
-            error: "Failed to create wallet. Please try again or provide your own wallet address.",
+            error:
+              "Failed to create wallet. Please try again or provide your own wallet address.",
             timestamp: Date.now(),
           });
         }
@@ -670,7 +780,10 @@ export class WebSocketRelayServer {
         this.send(client, {
           type: "server:wallet_assigned",
           success: false,
-          error: error instanceof Error ? error.message : "Unknown error creating wallet",
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown error creating wallet",
           timestamp: Date.now(),
         });
       }
@@ -681,7 +794,12 @@ export class WebSocketRelayServer {
     this.handleAuthenticate(client, undefined, name);
   }
 
-  private handleJoinRoom(client: Client, roomId: string, colorId?: number, asSpectator?: boolean): void {
+  private handleJoinRoom(
+    client: Client,
+    roomId: string,
+    colorId?: number,
+    asSpectator?: boolean,
+  ): void {
     const room = this.rooms.get(roomId);
     if (!room) {
       this.sendError(client, "ROOM_NOT_FOUND", `Room ${roomId} not found`);
@@ -704,14 +822,24 @@ export class WebSocketRelayServer {
       logger.info(`Spectator ${client.name} joined room ${roomId}`);
     } else {
       // Join as player - enforce both room.maxPlayers and global limit
-      const effectiveMaxPlayers = Math.min(room.maxPlayers, MAX_PLAYERS_PER_ROOM);
+      const effectiveMaxPlayers = Math.min(
+        room.maxPlayers,
+        MAX_PLAYERS_PER_ROOM,
+      );
       if (room.players.length >= effectiveMaxPlayers) {
-        this.sendError(client, "ROOM_FULL", `Room is full (max ${effectiveMaxPlayers} players)`);
+        this.sendError(
+          client,
+          "ROOM_FULL",
+          `Room is full (max ${effectiveMaxPlayers} players)`,
+        );
         return;
       }
 
       // Check if agent has wagered (in-memory first, then on-chain)
-      const hasInMemoryWager = wagerService.hasWagered(roomId, client.address || "");
+      const hasInMemoryWager = wagerService.hasWagered(
+        roomId,
+        client.address || "",
+      );
       if (!hasInMemoryWager) {
         // Check on-chain wager asynchronously
         this.checkOnChainWagerAndJoin(client, room, roomId, colorId);
@@ -729,7 +857,9 @@ export class WebSocketRelayServer {
       };
 
       room.players.push(playerState);
-      logger.info(`Player ${client.name} joined room ${roomId} (color: ${playerState.colorId}, wagered)`);
+      logger.info(
+        `Player ${client.name} joined room ${roomId} (color: ${playerState.colorId}, wagered)`,
+      );
 
       // Broadcast player joined to room
       this.broadcastToRoom(roomId, {
@@ -756,14 +886,19 @@ export class WebSocketRelayServer {
     client: Client,
     room: RoomState,
     roomId: string,
-    colorId?: number
+    colorId?: number,
   ): Promise<void> {
     try {
       // Check on-chain wager
-      const hasOnChainWager = await contractService.hasWagered(roomId, client.address || "");
+      const hasOnChainWager = await contractService.hasWagered(
+        roomId,
+        client.address || "",
+      );
 
       if (hasOnChainWager) {
-        logger.info(`Player ${client.name} has on-chain wager for room ${roomId}`);
+        logger.info(
+          `Player ${client.name} has on-chain wager for room ${roomId}`,
+        );
 
         // Sync to in-memory tracker
         wagerService.syncOnChainWager(roomId, client.address || "");
@@ -780,7 +915,9 @@ export class WebSocketRelayServer {
         };
 
         room.players.push(playerState);
-        logger.info(`Player ${client.name} joined room ${roomId} (color: ${playerState.colorId}, on-chain wager verified)`);
+        logger.info(
+          `Player ${client.name} joined room ${roomId} (color: ${playerState.colorId}, on-chain wager verified)`,
+        );
 
         // Broadcast player joined to room
         this.broadcastToRoom(roomId, {
@@ -796,26 +933,40 @@ export class WebSocketRelayServer {
         this.onPlayerJoinedRoom(roomId);
       } else {
         // No wager found - send wager required message
+        const currentBalance = await wagerService.getBalance(
+          client.address || "",
+        );
+        const canAfford = await wagerService.canAffordWager(
+          client.address || "",
+        );
+
         this.send(client, {
           type: "server:wager_required",
           gameId: roomId,
           amount: wagerService.getWagerAmount().toString(),
-          currentBalance: wagerService.getBalance(client.address || "").toString(),
-          canAfford: wagerService.canAffordWager(client.address || ""),
+          currentBalance: currentBalance.toString(),
+          canAfford: canAfford,
           vaultAddress: contractService.getVaultAddress() || "",
           timestamp: Date.now(),
         });
-        logger.info(`Player ${client.name} needs to wager before joining room ${roomId}`);
+        logger.info(
+          `Player ${client.name} needs to wager before joining room ${roomId}`,
+        );
       }
     } catch (error) {
       logger.error(`Error checking on-chain wager for ${client.name}:`, error);
       // Fall back to in-memory check failure
+      const currentBalance = await wagerService.getBalance(
+        client.address || "",
+      );
+      const canAfford = await wagerService.canAffordWager(client.address || "");
+
       this.send(client, {
         type: "server:wager_required",
         gameId: roomId,
         amount: wagerService.getWagerAmount().toString(),
-        currentBalance: wagerService.getBalance(client.address || "").toString(),
-        canAfford: wagerService.canAffordWager(client.address || ""),
+        currentBalance: currentBalance.toString(),
+        canAfford: canAfford,
         vaultAddress: contractService.getVaultAddress() || "",
         timestamp: Date.now(),
       });
@@ -831,7 +982,7 @@ export class WebSocketRelayServer {
 
     // Remove from players
     const playerIndex = room.players.findIndex(
-      (p) => p.address === client.address || p.address === client.id
+      (p) => p.address === client.address || p.address === client.id,
     );
     if (playerIndex >= 0) {
       room.players.splice(playerIndex, 1);
@@ -850,7 +1001,11 @@ export class WebSocketRelayServer {
     // Don't delete rooms when empty - keep them visible for reconnecting
     // Only delete rooms that have ended (handled in endGame)
     // But clean up extended state if the game ended and no one is in the room
-    if (room.players.length === 0 && room.spectators.length === 0 && room.phase === "ended") {
+    if (
+      room.players.length === 0 &&
+      room.spectators.length === 0 &&
+      room.phase === "ended"
+    ) {
       this.rooms.delete(roomId);
       this.extendedState.delete(roomId);
       logger.info(`Room ${roomId} deleted (ended and empty)`);
@@ -864,14 +1019,19 @@ export class WebSocketRelayServer {
     if (!room) return;
 
     if (room.players.length < MIN_PLAYERS_TO_START) {
-      logger.warn(`Cannot start ${roomId}: only ${room.players.length} players`);
+      logger.warn(
+        `Cannot start ${roomId}: only ${room.players.length} players`,
+      );
       return;
     }
 
     room.phase = "playing";
 
     // Assign impostors randomly
-    const impostorCount = Math.min(room.impostorCount, Math.floor(room.players.length / 3));
+    const impostorCount = Math.min(
+      room.impostorCount,
+      Math.floor(room.players.length / 3),
+    );
     const impostorIndices = new Set<number>();
     while (impostorIndices.size < impostorCount) {
       impostorIndices.add(Math.floor(Math.random() * room.players.length));
@@ -883,13 +1043,13 @@ export class WebSocketRelayServer {
     }
 
     // Find the slot for this room
-    const slot = this.roomSlots.find(s => s.roomId === roomId);
+    const slot = this.roomSlots.find((s) => s.roomId === roomId);
     const slotId = slot?.id ?? -1;
 
     // Initialize extended room state
     const extended: ExtendedRoomState = {
       ...room,
-      impostors: new Set(impostorAddresses.map(a => a.toLowerCase())),
+      impostors: new Set(impostorAddresses.map((a) => a.toLowerCase())),
       votes: new Map(),
       deadBodies: [],
       currentRound: 1,
@@ -907,32 +1067,44 @@ export class WebSocketRelayServer {
     for (const player of room.players) {
       if (!extended.impostors.has(player.address.toLowerCase())) {
         const taskLocations = this.generateTaskLocations(5);
-        this.gameStateManager.assignTasks(roomId, player.address, taskLocations);
+        this.gameStateManager.assignTasks(
+          roomId,
+          player.address,
+          taskLocations,
+        );
       }
     }
 
-    logger.info(`Game started in room ${roomId} with ${room.players.length} players, ${impostorCount} impostors: ${impostorAddresses.join(", ")}`);
+    logger.info(
+      `Game started in room ${roomId} with ${room.players.length} players, ${impostorCount} impostors: ${impostorAddresses.join(", ")}`,
+    );
 
     // Persist game start to database (background)
     const wagerAmount = wagerService.getWagerAmount();
-    databaseService.startGame(roomId, room.players.map(p => ({
-      walletAddress: p.address,
-      isImpostor: extended.impostors.has(p.address.toLowerCase()),
-      colorId: p.colorId,
-      wagerAmount,
-    })));
+    databaseService.startGame(
+      roomId,
+      room.players.map((p) => ({
+        walletAddress: p.address,
+        isImpostor: extended.impostors.has(p.address.toLowerCase()),
+        colorId: p.colorId,
+        wagerAmount,
+      })),
+    );
 
     // Create game on-chain (async, don't block game flow)
-    const playerAddresses = room.players.map(p => p.address);
-    contractService.createGame(roomId, playerAddresses, impostorAddresses)
-      .then(success => {
+    const playerAddresses = room.players.map((p) => p.address);
+    contractService
+      .createGame(roomId, playerAddresses, impostorAddresses)
+      .then((success) => {
         if (success) {
           logger.info(`Game ${roomId} created on-chain successfully`);
         } else {
-          logger.warn(`Failed to create game ${roomId} on-chain (continuing in off-chain mode)`);
+          logger.warn(
+            `Failed to create game ${roomId} on-chain (continuing in off-chain mode)`,
+          );
         }
       })
-      .catch(err => {
+      .catch((err) => {
         logger.error(`Error creating game ${roomId} on-chain:`, err);
       });
 
@@ -962,7 +1134,12 @@ export class WebSocketRelayServer {
     return locations;
   }
 
-  private handlePositionUpdate(client: Client, roomId: string, location: Location, round: number): void {
+  private handlePositionUpdate(
+    client: Client,
+    roomId: string,
+    location: Location,
+    round: number,
+  ): void {
     const room = this.rooms.get(roomId);
     if (!room) return;
 
@@ -978,7 +1155,7 @@ export class WebSocketRelayServer {
         client.address!,
         previousLocation,
         location,
-        false // not a vent
+        false, // not a vent
       );
 
       if (!validation.valid) {
@@ -1004,7 +1181,14 @@ export class WebSocketRelayServer {
     });
   }
 
-  private handleKill(client: Client, roomId: string, killer: string, victim: string, location: Location, round: number): void {
+  private async handleKill(
+    client: Client,
+    roomId: string,
+    killer: string,
+    victim: string,
+    location: Location,
+    round: number,
+  ): Promise<void> {
     const room = this.rooms.get(roomId);
     const extended = this.extendedState.get(roomId);
     if (!room || !extended) return;
@@ -1021,7 +1205,11 @@ export class WebSocketRelayServer {
 
     // Check kill cooldown
     if (!this.gameStateManager.canKill(roomId, killer, round)) {
-      const cooldown = this.gameStateManager.getKillCooldown(roomId, killer, round);
+      const cooldown = this.gameStateManager.getKillCooldown(
+        roomId,
+        killer,
+        round,
+      );
       this.send(client, {
         type: "server:error",
         code: "KILL_COOLDOWN",
@@ -1063,17 +1251,25 @@ export class WebSocketRelayServer {
     this.recordKill(killer);
 
     // Check win condition
-    this.checkAndHandleWinCondition(roomId);
+    await this.checkAndHandleWinCondition(roomId);
   }
 
-  private handleVote(client: Client, roomId: string, voter: string, target: string | null, round: number): void {
+  private handleVote(
+    client: Client,
+    roomId: string,
+    voter: string,
+    target: string | null,
+    round: number,
+  ): void {
     const room = this.rooms.get(roomId);
     const extended = this.extendedState.get(roomId);
     if (!room || !extended) return;
 
     // Only accept votes during voting phase
     if (extended.currentPhase !== 5) {
-      logger.warn(`Vote rejected: not in voting phase (current: ${extended.currentPhase})`);
+      logger.warn(
+        `Vote rejected: not in voting phase (current: ${extended.currentPhase})`,
+      );
       return;
     }
 
@@ -1081,7 +1277,10 @@ export class WebSocketRelayServer {
     if (!voterPlayer || !voterPlayer.isAlive) return;
 
     // Record the vote
-    extended.votes.set(voter.toLowerCase(), target ? target.toLowerCase() : null);
+    extended.votes.set(
+      voter.toLowerCase(),
+      target ? target.toLowerCase() : null,
+    );
     voterPlayer.hasVoted = true;
 
     this.broadcastToRoom(roomId, {
@@ -1094,8 +1293,8 @@ export class WebSocketRelayServer {
     });
 
     // Check if all votes are in
-    const alivePlayers = room.players.filter(p => p.isAlive);
-    const votedCount = alivePlayers.filter(p => p.hasVoted).length;
+    const alivePlayers = room.players.filter((p) => p.isAlive);
+    const votedCount = alivePlayers.filter((p) => p.hasVoted).length;
 
     if (votedCount >= alivePlayers.length) {
       // All votes are in, resolve immediately
@@ -1107,7 +1306,14 @@ export class WebSocketRelayServer {
     }
   }
 
-  private handleTaskComplete(client: Client, roomId: string, player: string, tasksCompleted: number, totalTasks: number, location?: Location): void {
+  private async handleTaskComplete(
+    client: Client,
+    roomId: string,
+    player: string,
+    tasksCompleted: number,
+    totalTasks: number,
+    location?: Location,
+  ): Promise<void> {
     const room = this.rooms.get(roomId);
     const extended = this.extendedState.get(roomId);
     if (!room || !extended) return;
@@ -1135,8 +1341,14 @@ export class WebSocketRelayServer {
     playerState.totalTasks = totalTasks;
 
     // Calculate total progress
-    const totalDone = room.players.reduce((sum, p) => sum + p.tasksCompleted, 0);
-    const totalRequired = room.players.reduce((sum, p) => sum + p.totalTasks, 0);
+    const totalDone = room.players.reduce(
+      (sum, p) => sum + p.tasksCompleted,
+      0,
+    );
+    const totalRequired = room.players.reduce(
+      (sum, p) => sum + p.totalTasks,
+      0,
+    );
     const progress = totalRequired > 0 ? (totalDone / totalRequired) * 100 : 0;
 
     this.broadcastToRoom(roomId, {
@@ -1151,11 +1363,17 @@ export class WebSocketRelayServer {
 
     // Check if all tasks are done
     if (progress >= 100) {
-      this.endGame(roomId, true, "tasks");
+      await this.endGame(roomId, true, "tasks");
     }
   }
 
-  private handlePhaseChange(client: Client, roomId: string, phase: GamePhase, round: number, phaseEndTime: number): void {
+  private handlePhaseChange(
+    client: Client,
+    roomId: string,
+    phase: GamePhase,
+    round: number,
+    phaseEndTime: number,
+  ): void {
     const room = this.rooms.get(roomId);
     if (!room) return;
 
@@ -1230,7 +1448,13 @@ export class WebSocketRelayServer {
 
   // ============ BODY REPORTING ============
 
-  private handleReportBody(client: Client, roomId: string, reporter: string, bodyLocation: Location, round: number): void {
+  private handleReportBody(
+    client: Client,
+    roomId: string,
+    reporter: string,
+    bodyLocation: Location,
+    round: number,
+  ): void {
     const room = this.rooms.get(roomId);
     const extended = this.extendedState.get(roomId);
     if (!room || !extended) return;
@@ -1247,7 +1471,7 @@ export class WebSocketRelayServer {
 
     // Validate reporter is alive
     const reporterPlayer = room.players.find(
-      p => p.address.toLowerCase() === reporter.toLowerCase()
+      (p) => p.address.toLowerCase() === reporter.toLowerCase(),
     );
     if (!reporterPlayer || !reporterPlayer.isAlive) {
       this.send(client, {
@@ -1270,7 +1494,7 @@ export class WebSocketRelayServer {
 
     // Find unreported body at this location
     const body = extended.deadBodies.find(
-      b => b.location === bodyLocation && !b.reported
+      (b) => b.location === bodyLocation && !b.reported,
     );
 
     if (!body) {
@@ -1296,7 +1520,9 @@ export class WebSocketRelayServer {
       timestamp: Date.now(),
     });
 
-    logger.info(`Body reported in room ${roomId}: ${reporter} found ${body.victim}`);
+    logger.info(
+      `Body reported in room ${roomId}: ${reporter} found ${body.victim}`,
+    );
 
     // Start discussion phase
     this.startDiscussionPhase(roomId);
@@ -1327,7 +1553,10 @@ export class WebSocketRelayServer {
     }
 
     // Check if player can call meeting
-    const canCall = this.gameStateManager.canCallMeeting(roomId, client.address);
+    const canCall = this.gameStateManager.canCallMeeting(
+      roomId,
+      client.address,
+    );
     if (!canCall.canCall) {
       this.send(client, {
         type: "server:error",
@@ -1338,7 +1567,10 @@ export class WebSocketRelayServer {
     }
 
     // Use the meeting
-    const remaining = this.gameStateManager.useEmergencyMeeting(roomId, client.address);
+    const remaining = this.gameStateManager.useEmergencyMeeting(
+      roomId,
+      client.address,
+    );
 
     // Broadcast meeting called
     this.broadcastToRoom(roomId, {
@@ -1349,7 +1581,9 @@ export class WebSocketRelayServer {
       timestamp: Date.now(),
     });
 
-    logger.info(`Emergency meeting called in room ${roomId} by ${client.address}`);
+    logger.info(
+      `Emergency meeting called in room ${roomId} by ${client.address}`,
+    );
 
     // Start discussion phase
     this.startDiscussionPhase(roomId);
@@ -1381,7 +1615,7 @@ export class WebSocketRelayServer {
 
     // Find sender player
     const senderPlayer = room.players.find(
-      p => p.address.toLowerCase() === client.address!.toLowerCase()
+      (p) => p.address.toLowerCase() === client.address!.toLowerCase(),
     );
     if (!senderPlayer) return;
 
@@ -1399,7 +1633,8 @@ export class WebSocketRelayServer {
         if (targetClient.roomId !== roomId) continue;
 
         const targetPlayer = room.players.find(
-          p => p.address?.toLowerCase() === targetClient.address?.toLowerCase()
+          (p) =>
+            p.address?.toLowerCase() === targetClient.address?.toLowerCase(),
         );
 
         // Send to dead players or spectators (non-players)
@@ -1428,12 +1663,18 @@ export class WebSocketRelayServer {
       });
     }
 
-    logger.debug(`Chat in room ${roomId} from ${senderName}: ${sanitizedMessage.slice(0, 50)}...`);
+    logger.debug(
+      `Chat in room ${roomId} from ${senderName}: ${sanitizedMessage.slice(0, 50)}...`,
+    );
   }
 
   // ============ SABOTAGE SYSTEM ============
 
-  private handleSabotage(client: Client, roomId: string, sabotageType: SabotageType): void {
+  private handleSabotage(
+    client: Client,
+    roomId: string,
+    sabotageType: SabotageType,
+  ): void {
     const room = this.rooms.get(roomId);
     const extended = this.extendedState.get(roomId);
     if (!room || !extended) return;
@@ -1458,7 +1699,10 @@ export class WebSocketRelayServer {
     }
 
     // Check if can sabotage
-    const canSabotage = this.gameStateManager.canSabotage(roomId, client.address);
+    const canSabotage = this.gameStateManager.canSabotage(
+      roomId,
+      client.address,
+    );
     if (!canSabotage.canSabotage) {
       this.send(client, {
         type: "server:error",
@@ -1480,7 +1724,11 @@ export class WebSocketRelayServer {
     }
 
     // Start sabotage
-    const sabotage = this.gameStateManager.startSabotage(roomId, client.address, sabotageType);
+    const sabotage = this.gameStateManager.startSabotage(
+      roomId,
+      client.address,
+      sabotageType,
+    );
     if (!sabotage) {
       this.send(client, {
         type: "server:error",
@@ -1501,7 +1749,9 @@ export class WebSocketRelayServer {
       timestamp: Date.now(),
     });
 
-    logger.info(`Sabotage started in room ${roomId}: type ${sabotageType} by ${client.address}`);
+    logger.info(
+      `Sabotage started in room ${roomId}: type ${sabotageType} by ${client.address}`,
+    );
 
     // Set up critical sabotage timer
     if (config.isCritical && config.timeLimit > 0) {
@@ -1511,7 +1761,11 @@ export class WebSocketRelayServer {
     }
   }
 
-  private handleFixSabotage(client: Client, roomId: string, location: Location): void {
+  private handleFixSabotage(
+    client: Client,
+    roomId: string,
+    location: Location,
+  ): void {
     const room = this.rooms.get(roomId);
     const extended = this.extendedState.get(roomId);
     if (!room || !extended) return;
@@ -1537,7 +1791,7 @@ export class WebSocketRelayServer {
 
     // Get player and verify they're alive and at the right location
     const player = room.players.find(
-      p => p.address.toLowerCase() === client.address!.toLowerCase()
+      (p) => p.address.toLowerCase() === client.address!.toLowerCase(),
     );
     if (!player || !player.isAlive) {
       this.send(client, {
@@ -1568,7 +1822,11 @@ export class WebSocketRelayServer {
       return;
     }
 
-    const result = this.gameStateManager.fixSabotage(roomId, client.address, location);
+    const result = this.gameStateManager.fixSabotage(
+      roomId,
+      client.address,
+      location,
+    );
 
     if (result.fixed) {
       // Sabotage fully fixed
@@ -1583,7 +1841,9 @@ export class WebSocketRelayServer {
       logger.info(`Sabotage fixed in room ${roomId} by ${client.address}`);
     } else if (result.partialFix) {
       // Partial fix (e.g., for Reactor)
-      logger.debug(`Partial sabotage fix in room ${roomId} by ${client.address} at location ${location}`);
+      logger.debug(
+        `Partial sabotage fix in room ${roomId} by ${client.address} at location ${location}`,
+      );
     } else if (result.reason) {
       this.send(client, {
         type: "server:error",
@@ -1593,7 +1853,7 @@ export class WebSocketRelayServer {
     }
   }
 
-  private checkCriticalSabotage(roomId: string): void {
+  private async checkCriticalSabotage(roomId: string): Promise<void> {
     const timedOut = this.gameStateManager.checkSabotageTimeout(roomId);
     if (timedOut) {
       const sabotage = this.gameStateManager.getActiveSabotage(roomId);
@@ -1606,15 +1866,24 @@ export class WebSocketRelayServer {
           reason: "timeout",
           timestamp: Date.now(),
         });
-        logger.info(`Critical sabotage timed out in room ${roomId} - Impostors win`);
-        this.endGame(roomId, false, "kills"); // Impostors win
+        logger.info(
+          `Critical sabotage timed out in room ${roomId} - Impostors win`,
+        );
+        this.endGame(roomId, false, "kills").catch((err) => {
+          logger.error(`Error ending game after sabotage timeout:`, err);
+        }); // Impostors win - fire and forget since this might be from a timer
       }
     }
   }
 
   // ============ VENT SYSTEM ============
 
-  private handleVent(client: Client, roomId: string, action: "enter" | "exit" | "move", targetLocation?: Location): void {
+  private handleVent(
+    client: Client,
+    roomId: string,
+    action: "enter" | "exit" | "move",
+    targetLocation?: Location,
+  ): void {
     const room = this.rooms.get(roomId);
     const extended = this.extendedState.get(roomId);
     if (!room || !extended) return;
@@ -1640,7 +1909,7 @@ export class WebSocketRelayServer {
 
     // Get player
     const player = room.players.find(
-      p => p.address.toLowerCase() === client.address!.toLowerCase()
+      (p) => p.address.toLowerCase() === client.address!.toLowerCase(),
     );
     if (!player || !player.isAlive) {
       this.send(client, {
@@ -1655,7 +1924,11 @@ export class WebSocketRelayServer {
 
     switch (action) {
       case "enter": {
-        const canEnter = this.gameStateManager.canEnterVent(roomId, client.address, currentLocation);
+        const canEnter = this.gameStateManager.canEnterVent(
+          roomId,
+          client.address,
+          currentLocation,
+        );
         if (!canEnter.canEnter) {
           this.send(client, {
             type: "server:error",
@@ -1668,8 +1941,15 @@ export class WebSocketRelayServer {
         this.gameStateManager.enterVent(roomId, client.address);
 
         // Broadcast to impostors and spectators only
-        this.broadcastVentAction(roomId, client.address, "enter", currentLocation);
-        logger.info(`Player ${client.address} entered vent at ${currentLocation} in room ${roomId}`);
+        this.broadcastVentAction(
+          roomId,
+          client.address,
+          "enter",
+          currentLocation,
+        );
+        logger.info(
+          `Player ${client.address} entered vent at ${currentLocation} in room ${roomId}`,
+        );
         break;
       }
 
@@ -1686,8 +1966,15 @@ export class WebSocketRelayServer {
         this.gameStateManager.exitVent(roomId, client.address);
 
         // Broadcast to impostors and spectators only
-        this.broadcastVentAction(roomId, client.address, "exit", currentLocation);
-        logger.info(`Player ${client.address} exited vent at ${currentLocation} in room ${roomId}`);
+        this.broadcastVentAction(
+          roomId,
+          client.address,
+          "exit",
+          currentLocation,
+        );
+        logger.info(
+          `Player ${client.address} exited vent at ${currentLocation} in room ${roomId}`,
+        );
         break;
       }
 
@@ -1716,7 +2003,7 @@ export class WebSocketRelayServer {
           client.address,
           currentLocation,
           targetLocation,
-          true // isVent = true
+          true, // isVent = true
         );
 
         if (!validation.valid) {
@@ -1732,8 +2019,16 @@ export class WebSocketRelayServer {
         player.location = targetLocation;
 
         // Broadcast to impostors and spectators only
-        this.broadcastVentAction(roomId, client.address, "move", currentLocation, targetLocation);
-        logger.info(`Player ${client.address} moved through vent from ${currentLocation} to ${targetLocation} in room ${roomId}`);
+        this.broadcastVentAction(
+          roomId,
+          client.address,
+          "move",
+          currentLocation,
+          targetLocation,
+        );
+        logger.info(
+          `Player ${client.address} moved through vent from ${currentLocation} to ${targetLocation} in room ${roomId}`,
+        );
         break;
       }
     }
@@ -1744,7 +2039,7 @@ export class WebSocketRelayServer {
     player: string,
     action: "enter" | "exit" | "move",
     fromLocation: Location,
-    toLocation?: Location
+    toLocation?: Location,
   ): void {
     const room = this.rooms.get(roomId);
     const extended = this.extendedState.get(roomId);
@@ -1764,10 +2059,15 @@ export class WebSocketRelayServer {
     for (const [clientId, targetClient] of this.clients) {
       if (targetClient.roomId !== roomId) continue;
 
-      const isImpostor = targetClient.address &&
+      const isImpostor =
+        targetClient.address &&
         extended.impostors.has(targetClient.address.toLowerCase());
-      const isSpectator = !targetClient.address ||
-        !room.players.find(p => p.address.toLowerCase() === targetClient.address?.toLowerCase());
+      const isSpectator =
+        !targetClient.address ||
+        !room.players.find(
+          (p) =>
+            p.address.toLowerCase() === targetClient.address?.toLowerCase(),
+        );
 
       if (isImpostor || isSpectator) {
         this.send(targetClient, message);
@@ -1777,7 +2077,11 @@ export class WebSocketRelayServer {
 
   // ============ CAMERA SYSTEM ============
 
-  private handleUseCameras(client: Client, roomId: string, action: "start" | "stop"): void {
+  private handleUseCameras(
+    client: Client,
+    roomId: string,
+    action: "start" | "stop",
+  ): void {
     const room = this.rooms.get(roomId);
     const extended = this.extendedState.get(roomId);
     if (!room || !extended) return;
@@ -1803,7 +2107,7 @@ export class WebSocketRelayServer {
 
     // Get player and verify they're alive and at Security
     const player = room.players.find(
-      p => p.address.toLowerCase() === client.address!.toLowerCase()
+      (p) => p.address.toLowerCase() === client.address!.toLowerCase(),
     );
     if (!player || !player.isAlive) {
       this.send(client, {
@@ -1830,10 +2134,14 @@ export class WebSocketRelayServer {
       // Send initial camera feed
       this.sendCameraFeed(client, roomId);
 
-      logger.info(`Player ${client.address} started watching cameras in room ${roomId}`);
+      logger.info(
+        `Player ${client.address} started watching cameras in room ${roomId}`,
+      );
     } else {
       this.gameStateManager.stopWatchingCameras(roomId, client.address);
-      logger.info(`Player ${client.address} stopped watching cameras in room ${roomId}`);
+      logger.info(
+        `Player ${client.address} stopped watching cameras in room ${roomId}`,
+      );
     }
 
     // Broadcast camera status change (red light indicator)
@@ -1846,7 +2154,7 @@ export class WebSocketRelayServer {
     this.send(client, {
       type: "server:camera_feed",
       gameId: roomId,
-      playersVisible: playersVisible.map(p => ({
+      playersVisible: playersVisible.map((p) => ({
         address: p.address,
         location: p.location as Location,
         isAlive: p.isAlive,
@@ -2001,7 +2309,7 @@ export class WebSocketRelayServer {
     let wasImpostor = false;
     if (ejected) {
       const ejectedPlayer = room.players.find(
-        p => p.address.toLowerCase() === ejected!.toLowerCase()
+        (p) => p.address.toLowerCase() === ejected!.toLowerCase(),
       );
       if (ejectedPlayer) {
         ejectedPlayer.isAlive = false;
@@ -2017,7 +2325,9 @@ export class WebSocketRelayServer {
         timestamp: Date.now(),
       });
 
-      logger.info(`Player ejected in room ${roomId}: ${ejected} (${wasImpostor ? "Impostor" : "Crewmate"})`);
+      logger.info(
+        `Player ejected in room ${roomId}: ${ejected} (${wasImpostor ? "Impostor" : "Crewmate"})`,
+      );
     }
 
     // Check win condition
@@ -2025,7 +2335,13 @@ export class WebSocketRelayServer {
     if (winResult.winner) {
       // Delay game end to show ejection
       setTimeout(() => {
-        this.endGame(roomId, winResult.winner === "crewmates", winResult.reason!);
+        this.endGame(
+          roomId,
+          winResult.winner === "crewmates",
+          winResult.reason!,
+        ).catch((err) => {
+          logger.error(`Error ending game after ejection:`, err);
+        });
       }, EJECTION_DURATION);
       return;
     }
@@ -2042,7 +2358,7 @@ export class WebSocketRelayServer {
     if (!room || !extended) return;
 
     // Clear bodies that were reported
-    extended.deadBodies = extended.deadBodies.filter(b => !b.reported);
+    extended.deadBodies = extended.deadBodies.filter((b) => !b.reported);
 
     // Increment round
     extended.currentRound++;
@@ -2066,7 +2382,9 @@ export class WebSocketRelayServer {
       timestamp: Date.now(),
     });
 
-    logger.info(`Returned to ActionCommit phase in room ${roomId}, round ${extended.currentRound}`);
+    logger.info(
+      `Returned to ActionCommit phase in room ${roomId}, round ${extended.currentRound}`,
+    );
   }
 
   // ============ WIN CONDITIONS ============
@@ -2076,13 +2394,22 @@ export class WebSocketRelayServer {
     const extended = this.extendedState.get(roomId);
     if (!room || !extended) return { winner: null };
 
-    const alivePlayers = room.players.filter(p => p.isAlive);
-    const aliveImpostors = alivePlayers.filter(p => extended.impostors.has(p.address.toLowerCase()));
-    const aliveCrewmates = alivePlayers.filter(p => !extended.impostors.has(p.address.toLowerCase()));
+    const alivePlayers = room.players.filter((p) => p.isAlive);
+    const aliveImpostors = alivePlayers.filter((p) =>
+      extended.impostors.has(p.address.toLowerCase()),
+    );
+    const aliveCrewmates = alivePlayers.filter(
+      (p) => !extended.impostors.has(p.address.toLowerCase()),
+    );
 
     // Impostors win if they equal or outnumber crewmates
-    if (aliveImpostors.length >= aliveCrewmates.length && aliveCrewmates.length > 0) {
-      logger.info(`Win condition: Impostors (${aliveImpostors.length}) >= Crewmates (${aliveCrewmates.length})`);
+    if (
+      aliveImpostors.length >= aliveCrewmates.length &&
+      aliveCrewmates.length > 0
+    ) {
+      logger.info(
+        `Win condition: Impostors (${aliveImpostors.length}) >= Crewmates (${aliveCrewmates.length})`,
+      );
       return { winner: "impostors", reason: "kills" };
     }
 
@@ -2093,25 +2420,41 @@ export class WebSocketRelayServer {
     }
 
     // Crewmates win if all tasks are completed
-    const totalTasksCompleted = room.players.reduce((sum, p) => sum + p.tasksCompleted, 0);
-    const totalTasksRequired = room.players.reduce((sum, p) => sum + p.totalTasks, 0);
+    const totalTasksCompleted = room.players.reduce(
+      (sum, p) => sum + p.tasksCompleted,
+      0,
+    );
+    const totalTasksRequired = room.players.reduce(
+      (sum, p) => sum + p.totalTasks,
+      0,
+    );
 
     if (totalTasksRequired > 0 && totalTasksCompleted >= totalTasksRequired) {
-      logger.info(`Win condition: All tasks completed (${totalTasksCompleted}/${totalTasksRequired})`);
+      logger.info(
+        `Win condition: All tasks completed (${totalTasksCompleted}/${totalTasksRequired})`,
+      );
       return { winner: "crewmates", reason: "tasks" };
     }
 
     return { winner: null };
   }
 
-  private checkAndHandleWinCondition(roomId: string): void {
+  private async checkAndHandleWinCondition(roomId: string): Promise<void> {
     const winResult = this.checkWinCondition(roomId);
     if (winResult.winner) {
-      this.endGame(roomId, winResult.winner === "crewmates", winResult.reason!);
+      await this.endGame(
+        roomId,
+        winResult.winner === "crewmates",
+        winResult.reason!,
+      );
     }
   }
 
-  private endGame(roomId: string, crewmatesWon: boolean, reason: "tasks" | "votes" | "kills"): void {
+  private async endGame(
+    roomId: string,
+    crewmatesWon: boolean,
+    reason: "tasks" | "votes" | "kills",
+  ): Promise<void> {
     const room = this.rooms.get(roomId);
     const extended = this.extendedState.get(roomId);
     if (!room) return;
@@ -2130,8 +2473,10 @@ export class WebSocketRelayServer {
     const losers: string[] = [];
 
     for (const player of room.players) {
-      const isImpostor = extended?.impostors.has(player.address.toLowerCase()) ?? false;
-      const playerWon = (crewmatesWon && !isImpostor) || (!crewmatesWon && isImpostor);
+      const isImpostor =
+        extended?.impostors.has(player.address.toLowerCase()) ?? false;
+      const playerWon =
+        (crewmatesWon && !isImpostor) || (!crewmatesWon && isImpostor);
 
       if (playerWon) {
         winners.push(player.address);
@@ -2140,23 +2485,27 @@ export class WebSocketRelayServer {
       }
     }
 
-    const wagerResult = wagerService.distributeWinnings(roomId, winners, losers);
+    const wagerResult = wagerService.distributeWinnings(
+      roomId,
+      winners,
+      losers,
+    );
     const totalPot = wagerService.getGamePot(roomId);
 
     // Settle game on-chain (async, don't block game flow)
-    const playerAddresses = room.players.map(p => p.address);
-    const playerKills = room.players.map(p => {
+    const playerAddresses = room.players.map((p) => p.address);
+    const playerKills = room.players.map((p) => {
       const stats = this.agentStats.get(p.address.toLowerCase());
       return stats?.kills ?? 0;
     });
-    const playerTasks = room.players.map(p => p.tasksCompleted);
+    const playerTasks = room.players.map((p) => p.tasksCompleted);
 
     // Persist game end to database (background)
     databaseService.endGame(roomId, {
       crewmatesWon,
       winReason: reason,
       winners,
-      playerStats: room.players.map(p => ({
+      playerStats: room.players.map((p) => ({
         walletAddress: p.address,
         kills: this.agentStats.get(p.address.toLowerCase())?.kills ?? 0,
         tasksCompleted: p.tasksCompleted,
@@ -2165,8 +2514,16 @@ export class WebSocketRelayServer {
       winningsPerPlayer: wagerResult.winningsPerPlayer,
     });
 
-    contractService.settleGame(roomId, crewmatesWon, winners, playerAddresses, playerKills, playerTasks)
-      .then(success => {
+    contractService
+      .settleGame(
+        roomId,
+        crewmatesWon,
+        winners,
+        playerAddresses,
+        playerKills,
+        playerTasks,
+      )
+      .then((success) => {
         if (success) {
           logger.info(`Game ${roomId} settled on-chain successfully`);
           // Update database with settlement tx hash
@@ -2175,7 +2532,7 @@ export class WebSocketRelayServer {
           logger.warn(`Failed to settle game ${roomId} on-chain`);
         }
       })
-      .catch(err => {
+      .catch((err) => {
         logger.error(`Error settling game ${roomId} on-chain:`, err);
       });
 
@@ -2185,7 +2542,8 @@ export class WebSocketRelayServer {
     }
 
     // Find slot
-    const slotId = extended?.slotId ?? this.roomSlots.findIndex(s => s.roomId === roomId);
+    const slotId =
+      extended?.slotId ?? this.roomSlots.findIndex((s) => s.roomId === roomId);
 
     // Broadcast game ended with wager info
     this.broadcastToRoom(roomId, {
@@ -2204,17 +2562,20 @@ export class WebSocketRelayServer {
     for (const player of room.players) {
       const client = this.findClientByAddress(player.address);
       if (client) {
+        const balance = await wagerService.getBalance(player.address);
         this.send(client, {
           type: "server:balance",
           address: player.address,
-          balance: wagerService.getBalance(player.address).toString(),
+          balance: balance.toString(),
           wagerAmount: wagerService.getWagerAmount().toString(),
           timestamp: Date.now(),
         });
       }
     }
 
-    logger.info(`Game ended in room ${roomId}: ${crewmatesWon ? "Crewmates" : "Impostors"} win by ${reason}. Pot: ${totalPot.toString()} distributed to ${winners.length} winners.`);
+    logger.info(
+      `Game ended in room ${roomId}: ${crewmatesWon ? "Crewmates" : "Impostors"} win by ${reason}. Pot: ${totalPot.toString()} distributed to ${winners.length} winners.`,
+    );
 
     // Start cooldown for this slot after a short delay (let players see the end screen)
     setTimeout(() => {
@@ -2260,26 +2621,28 @@ export class WebSocketRelayServer {
     }
 
     // Build slot info with cooldown times
-    const slots = this.roomSlots.map(slot => ({
+    const slots = this.roomSlots.map((slot) => ({
       id: slot.id,
       state: slot.state,
       roomId: slot.roomId,
       cooldownEndTime: slot.cooldownEndTime,
-      cooldownRemaining: slot.cooldownEndTime ? Math.max(0, slot.cooldownEndTime - Date.now()) : null,
+      cooldownRemaining: slot.cooldownEndTime
+        ? Math.max(0, slot.cooldownEndTime - Date.now())
+        : null,
     }));
 
     return {
       connections: {
         total: this.clients.size,
         agents: totalAgents,
-        spectators: totalSpectators
+        spectators: totalSpectators,
       },
       rooms: {
         total: this.rooms.size,
         maxRooms: MAX_ROOMS,
         lobby: lobbyRooms,
         playing: activeGames,
-        totalPlayers
+        totalPlayers,
       },
       limits: {
         maxRooms: MAX_ROOMS,
@@ -2370,7 +2733,9 @@ export class WebSocketRelayServer {
       }
     }
 
-    logger.info(`Game stats recorded for ${room.players.length} players in room ${roomId}`);
+    logger.info(
+      `Game stats recorded for ${room.players.length} players in room ${roomId}`,
+    );
     this.broadcastLeaderboard();
   }
 
@@ -2414,13 +2779,14 @@ export class WebSocketRelayServer {
 
     // Cancel game on-chain if it was playing
     if (room.phase === "playing") {
-      contractService.cancelGame(roomId)
-        .then(success => {
+      contractService
+        .cancelGame(roomId)
+        .then((success) => {
           if (success) {
             logger.info(`Game ${roomId} cancelled on-chain (manual delete)`);
           }
         })
-        .catch(err => {
+        .catch((err) => {
           logger.error(`Error cancelling game ${roomId} on-chain:`, err);
         });
     }
@@ -2455,12 +2821,16 @@ export class WebSocketRelayServer {
 
   // ============ OPERATOR / PRIVY HANDLERS ============
 
-  private async handleCreateAgent(client: Client, operatorKey: string): Promise<void> {
+  private async handleCreateAgent(
+    client: Client,
+    operatorKey: string,
+  ): Promise<void> {
     if (!privyWalletService.isEnabled()) {
       this.send(client, {
         type: "server:agent_created",
         success: false,
-        error: "Privy wallet service not configured. Set PRIVY_APP_ID and PRIVY_APP_SECRET.",
+        error:
+          "Privy wallet service not configured. Set PRIVY_APP_ID and PRIVY_APP_SECRET.",
         timestamp: Date.now(),
       });
       return;
@@ -2488,7 +2858,9 @@ export class WebSocketRelayServer {
           userId: result.userId,
           timestamp: Date.now(),
         });
-        logger.info(`Agent wallet created for operator ${operatorKey}: ${result.address}`);
+        logger.info(
+          `Agent wallet created for operator ${operatorKey}: ${result.address}`,
+        );
       } else {
         this.send(client, {
           type: "server:agent_created",
@@ -2532,7 +2904,12 @@ export class WebSocketRelayServer {
     });
   }
 
-  private handleWithdrawRequest(client: Client, operatorKey: string, agentAddress: string, amount?: string): void {
+  private async handleWithdrawRequest(
+    client: Client,
+    operatorKey: string,
+    agentAddress: string,
+    amount?: string,
+  ): Promise<void> {
     // Validate operator key format
     if (!operatorKey || !operatorKey.startsWith("oper_")) {
       this.send(client, {
@@ -2547,7 +2924,9 @@ export class WebSocketRelayServer {
 
     // Verify operator owns this agent
     const agents = privyWalletService.getAgentWalletsForOperator(operatorKey);
-    const ownsAgent = agents.some(a => a.address.toLowerCase() === agentAddress.toLowerCase());
+    const ownsAgent = agents.some(
+      (a) => a.address.toLowerCase() === agentAddress.toLowerCase(),
+    );
 
     if (!ownsAgent) {
       this.send(client, {
@@ -2561,7 +2940,7 @@ export class WebSocketRelayServer {
     }
 
     // Get agent's balance
-    const balance = wagerService.getBalance(agentAddress);
+    const balance = await wagerService.getBalance(agentAddress);
     if (balance <= BigInt(0)) {
       this.send(client, {
         type: "server:withdraw_result",
@@ -2575,7 +2954,9 @@ export class WebSocketRelayServer {
 
     // For now, just return success - actual on-chain withdrawal would go here
     // In production, this would trigger a Privy wallet transfer
-    logger.info(`Withdraw request: ${agentAddress} for ${amount || "max"} (balance: ${balance})`);
+    logger.info(
+      `Withdraw request: ${agentAddress} for ${amount || "max"} (balance: ${balance})`,
+    );
 
     this.send(client, {
       type: "server:withdraw_result",
@@ -2593,22 +2974,30 @@ export class WebSocketRelayServer {
    * In production, this would be triggered by on-chain deposit events
    * For now, agents can self-deposit for testing
    */
-  private handleDeposit(client: Client, amount: string): void {
+  private async handleDeposit(client: Client, amount: string): Promise<void> {
     if (!client.address) {
-      this.sendError(client, "NOT_AUTHENTICATED", "Must authenticate before depositing");
+      this.sendError(
+        client,
+        "NOT_AUTHENTICATED",
+        "Must authenticate before depositing",
+      );
       return;
     }
 
     try {
       const amountBigInt = BigInt(amount);
       if (amountBigInt <= 0) {
-        this.sendError(client, "INVALID_AMOUNT", "Deposit amount must be positive");
+        this.sendError(
+          client,
+          "INVALID_AMOUNT",
+          "Deposit amount must be positive",
+        );
         return;
       }
 
       wagerService.deposit(client.address, amountBigInt);
 
-      const balance = wagerService.getBalance(client.address);
+      const balance = await wagerService.getBalance(client.address);
 
       this.send(client, {
         type: "server:deposit_confirmed",
@@ -2627,9 +3016,16 @@ export class WebSocketRelayServer {
   /**
    * Handle wager submission to join a game
    */
-  private handleSubmitWager(client: Client, gameId: string): void {
+  private async handleSubmitWager(
+    client: Client,
+    gameId: string,
+  ): Promise<void> {
     if (!client.address) {
-      this.sendError(client, "NOT_AUTHENTICATED", "Must authenticate before wagering");
+      this.sendError(
+        client,
+        "NOT_AUTHENTICATED",
+        "Must authenticate before wagering",
+      );
       return;
     }
 
@@ -2640,31 +3036,37 @@ export class WebSocketRelayServer {
     }
 
     if (room.phase !== "lobby") {
-      this.sendError(client, "GAME_STARTED", "Cannot wager after game has started");
+      this.sendError(
+        client,
+        "GAME_STARTED",
+        "Cannot wager after game has started",
+      );
       return;
     }
 
     // Submit wager
-    const result = wagerService.submitWager(gameId, client.address);
+    const result = await wagerService.submitWager(gameId, client.address);
 
     if (!result.success) {
+      const balance = await wagerService.getBalance(client.address);
       this.send(client, {
         type: "server:wager_failed",
         gameId,
         error: result.error || "Wager failed",
         requiredAmount: wagerService.getWagerAmount().toString(),
-        currentBalance: wagerService.getBalance(client.address).toString(),
+        currentBalance: balance.toString(),
         timestamp: Date.now(),
       });
       return;
     }
 
     // Wager accepted
+    const balance = await wagerService.getBalance(client.address);
     this.send(client, {
       type: "server:wager_accepted",
       gameId,
       amount: wagerService.getWagerAmount().toString(),
-      newBalance: wagerService.getBalance(client.address).toString(),
+      newBalance: balance.toString(),
       totalPot: wagerService.getGamePot(gameId).toString(),
       timestamp: Date.now(),
     });
@@ -2684,18 +3086,23 @@ export class WebSocketRelayServer {
   /**
    * Handle balance query
    */
-  private handleGetBalance(client: Client): void {
+  private async handleGetBalance(client: Client): Promise<void> {
     if (!client.address) {
-      this.sendError(client, "NOT_AUTHENTICATED", "Must authenticate to check balance");
+      this.sendError(
+        client,
+        "NOT_AUTHENTICATED",
+        "Must authenticate to check balance",
+      );
       return;
     }
 
-    const balanceInfo = wagerService.getBalanceInfo(client.address);
+    const balanceInfo = await wagerService.getBalanceInfo(client.address);
+    const balance = await wagerService.getBalance(client.address);
 
     this.send(client, {
       type: "server:balance",
       address: client.address,
-      balance: wagerService.getBalance(client.address).toString(),
+      balance: balance.toString(),
       totalDeposited: balanceInfo?.totalDeposited.toString() || "0",
       totalWon: balanceInfo?.totalWon.toString() || "0",
       totalLost: balanceInfo?.totalLost.toString() || "0",
