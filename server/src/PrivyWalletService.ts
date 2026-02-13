@@ -173,6 +173,7 @@ export class PrivyWalletService {
     }
 
     const wallet = await this.getAgentWallet(address);
+
     if (!wallet) {
       logger.error(`No agent wallet found for address: ${address}`);
       return null;
@@ -182,6 +183,7 @@ export class PrivyWalletService {
       logger.info(`Sending transaction from agent ${address} to ${to}`);
 
       const chainId = parseInt(process.env.CHAIN_ID || "10143");
+
 
       // Correct API for server-side signing in @privy-io/node
       const authorizationContext: AuthorizationContext = {
