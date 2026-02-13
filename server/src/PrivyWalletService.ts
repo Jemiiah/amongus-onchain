@@ -201,7 +201,6 @@ export class PrivyWalletService {
       // Correct API for server-side signing in @privy-io/node
       const response = await this.client.wallets().ethereum().sendTransaction(wallet.walletId, {
         caip2: `eip155:${chainId}`,
-        sponsor: true,
         params: {
           transaction: {
             to,
