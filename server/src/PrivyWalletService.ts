@@ -186,8 +186,10 @@ export class PrivyWalletService {
 
 
       // Correct API for server-side signing in @privy-io/node
+      // Strip "wallet-auth:" prefix if present - SDK expects raw base64 PKCS8 key
+      const privateKey = PRIVY_WALLET_AUTHORIZATION_KEY.replace(/^wallet-auth:/, '');
       const authorizationContext: AuthorizationContext = {
-        authorization_private_keys: [PRIVY_WALLET_AUTHORIZATION_KEY]
+        authorization_private_keys: [privateKey]
       };
 
       const response = await this.client.wallets().ethereum().sendTransaction(wallet.walletId, {

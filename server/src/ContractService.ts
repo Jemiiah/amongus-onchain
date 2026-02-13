@@ -6,7 +6,7 @@ const logger = createLogger("contract-service");
 
 // Contract ABIs (minimal interfaces)
 const WAGER_VAULT_ABI = [
-  "function deposit(uint256 amount) external",
+  "function deposit() external payable",
   "function withdraw(uint256 amount) external",
   "function placeWager(bytes32 gameId) external",
   "function getBalance(address agent) external view returns (uint256)",
@@ -313,7 +313,7 @@ export class ContractService {
   }
 
   /**
-   * Deposit MON tokens into WagerVault using an agent's wallet via Privy
+   * Deposit native MON into WagerVault using an agent's wallet via Privy
    */
   async deposit(agentAddress: string, amount: bigint): Promise<string | null> {
     if (!this.enabled) return "0x_mock_tx_hash";
@@ -324,43 +324,17 @@ export class ContractService {
     }
 
     try {
-      // First check allowance
-      const allowance = await this.monadToken.allowance(agentAddress, this.wagerVaultAddress);
+      logger.info(`Depositing ${amount} native MON into WagerVault for ${agentAddress}`);
 
-      if (BigInt(allowance.toString()) < amount) {
-        logger.info(`Approving WagerVault to spend ${amount} tokens for ${agentAddress}`);
-        const approveData = this.monadToken.interface.encodeFunctionData("approve", [
-          this.wagerVaultAddress,
-          ethers.MaxUint256
-        ]);
+      // Encode deposit() call (no arguments for payable function)
+      const depositData = this.wagerVault.interface.encodeFunctionData("deposit", []);
 
-        const approveHash = await privyWalletService.sendTransaction(
-          agentAddress,
-          this.monadTokenAddress,
-          approveData
-        );
-
-        if (approveHash) {
-          if (approveHash.startsWith("0x_mock")) {
-            logger.info(`Mock approve transaction detected, skipping wait: ${approveHash}`);
-          } else {
-            logger.info(`Waiting for approve transaction confirmation: ${approveHash}`);
-            await this.provider.waitForTransaction(approveHash);
-            logger.info("Approve transaction confirmed");
-          }
-        } else {
-          logger.error("Failed to send approve transaction");
-          return null;
-        }
-      }
-
-      logger.info(`Depositing ${amount} tokens into WagerVault for ${agentAddress}`);
-      const depositData = this.wagerVault.interface.encodeFunctionData("deposit", [amount]);
-
+      // Send native MON as transaction value
       const txHash = await privyWalletService.sendTransaction(
         agentAddress,
         this.wagerVaultAddress,
-        depositData
+        depositData,
+        amount.toString() // Pass amount as value
       );
 
       return txHash;
