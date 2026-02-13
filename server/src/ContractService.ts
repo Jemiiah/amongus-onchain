@@ -341,9 +341,13 @@ export class ContractService {
         );
 
         if (approveHash) {
-          logger.info(`Waiting for approve transaction confirmation: ${approveHash}`);
-          await this.provider.waitForTransaction(approveHash);
-          logger.info("Approve transaction confirmed");
+          if (approveHash.startsWith("0x_mock")) {
+            logger.info(`Mock approve transaction detected, skipping wait: ${approveHash}`);
+          } else {
+            logger.info(`Waiting for approve transaction confirmation: ${approveHash}`);
+            await this.provider.waitForTransaction(approveHash);
+            logger.info("Approve transaction confirmed");
+          }
         } else {
           logger.error("Failed to send approve transaction");
           return null;
