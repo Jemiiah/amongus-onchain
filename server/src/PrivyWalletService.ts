@@ -39,7 +39,10 @@ export class PrivyWalletService {
       logger.info("Privy wallet service initialized");
 
       if (PRIVY_WALLET_AUTHORIZATION_KEY && !PRIVY_WALLET_AUTHORIZATION_KEY_ID) {
-        logger.warn("PRIVY_WALLET_AUTHORIZATION_KEY is set but PRIVY_WALLET_AUTHORIZATION_KEY_ID is missing. Server-side wallet signing will fail.");
+        logger.warn("PRIVY_WALLET_AUTHORIZATION_KEY is set but PRIVY_WALLET_AUTHORIZATION_KEY_ID (owner_id) is missing. Server-side wallet signing will fail.");
+      }
+      if (PRIVY_WALLET_AUTHORIZATION_KEY_ID) {
+        logger.info(`Using authorization key owner_id: ${PRIVY_WALLET_AUTHORIZATION_KEY_ID}`);
       }
     } else {
       logger.warn("Privy not configured - wallet creation disabled. Set PRIVY_APP_ID and PRIVY_APP_SECRET in .env");
@@ -71,9 +74,10 @@ export class PrivyWalletService {
         chain_type: "ethereum",
       };
 
-      // Associate wallet with authorization key so it can sign transactions
+      // Associate wallet with authorization key owner so it can sign transactions
+      // The owner_id is the key quorum ID from the Privy dashboard
       if (PRIVY_WALLET_AUTHORIZATION_KEY_ID) {
-        createOptions.authorization_key_ids = [PRIVY_WALLET_AUTHORIZATION_KEY_ID];
+        createOptions.owner_id = PRIVY_WALLET_AUTHORIZATION_KEY_ID;
       }
 
       const wallet = await this.client.wallets().create(createOptions);
