@@ -2995,7 +2995,7 @@ export class WebSocketRelayServer {
         return;
       }
 
-      wagerService.deposit(client.address, amountBigInt);
+      await wagerService.deposit(client.address, amountBigInt);
 
       const balance = await wagerService.getBalance(client.address);
 

@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import { createLogger } from "./logger.js";
+import { privyWalletService } from "./PrivyWalletService.js";
 
 const logger = createLogger("contract-service");
 
@@ -71,6 +72,10 @@ export class ContractService {
   private enabled: boolean = false;
   private networkMode: "testnet" | "mainnet" = "testnet";
 
+  // Store addresses for encoding
+  private wagerVaultAddress: string = "";
+  private monadTokenAddress: string = "";
+
   constructor() {
     const config = this.getConfig();
 
@@ -113,6 +118,9 @@ export class ContractService {
         ERC20_ABI,
         this.operatorWallet,
       );
+
+      this.wagerVaultAddress = config.wagerVaultAddress;
+      this.monadTokenAddress = config.monadTokenAddress;
 
       this.enabled = true;
       logger.info("Contract service initialized successfully");
@@ -268,6 +276,74 @@ export class ContractService {
     } catch (error) {
       logger.error(`Failed to get pot for ${roomId}:`, error);
       return BigInt(0);
+    }
+  }
+
+  /**
+   * Place a wager on-chain using an agent's wallet via Privy
+   */
+  async placeWager(agentAddress: string, roomId: string): Promise<string | null> {
+    if (!this.enabled) {
+      logger.warn("Contract service disabled - skipping on-chain placeWager");
+      return "0x_mock_tx_hash";
+    }
+
+    try {
+      const gameId = this.gameIdToBytes32(roomId);
+      const data = this.wagerVault.interface.encodeFunctionData("placeWager", [gameId]);
+
+      logger.info(`Placing on-chain wager for agent ${agentAddress} in game ${roomId}`);
+
+      const txHash = await privyWalletService.sendTransaction(
+        agentAddress,
+        this.wagerVaultAddress,
+        data
+      );
+
+      return txHash;
+    } catch (error) {
+      logger.error(`Failed to place on-chain wager for ${agentAddress}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Deposit MON tokens into WagerVault using an agent's wallet via Privy
+   */
+  async deposit(agentAddress: string, amount: bigint): Promise<string | null> {
+    if (!this.enabled) return "0x_mock_tx_hash";
+
+    try {
+      // First check allowance
+      const allowance = await this.monadToken.allowance(agentAddress, this.wagerVaultAddress);
+
+      if (BigInt(allowance.toString()) < amount) {
+        logger.info(`Approving WagerVault to spend ${amount} tokens for ${agentAddress}`);
+        const approveData = this.monadToken.interface.encodeFunctionData("approve", [
+          this.wagerVaultAddress,
+          ethers.MaxUint256
+        ]);
+
+        await privyWalletService.sendTransaction(
+          agentAddress,
+          this.monadTokenAddress,
+          approveData
+        );
+      }
+
+      logger.info(`Depositing ${amount} tokens into WagerVault for ${agentAddress}`);
+      const depositData = this.wagerVault.interface.encodeFunctionData("deposit", [amount]);
+
+      const txHash = await privyWalletService.sendTransaction(
+        agentAddress,
+        this.wagerVaultAddress,
+        depositData
+      );
+
+      return txHash;
+    } catch (error) {
+      logger.error(`Failed to deposit on-chain for ${agentAddress}:`, error);
+      return null;
     }
   }
 

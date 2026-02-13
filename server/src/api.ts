@@ -390,7 +390,7 @@ export function createApiServer(wsServer: WebSocketRelayServer) {
         return;
       }
 
-      wagerService.deposit(address, amountBigInt);
+      await wagerService.deposit(address, amountBigInt);
 
       const newBalance = await wagerService.getBalance(address);
 

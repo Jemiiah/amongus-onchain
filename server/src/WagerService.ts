@@ -57,12 +57,20 @@ export class WagerService {
    * Deposit funds to an agent's balance
    * This syncs the database after an on-chain deposit event
    */
-  deposit(address: string, amount: bigint): boolean {
+  async deposit(address: string, amount: bigint): Promise<boolean> {
+    // Perform on-chain deposit first
+    const txHash = await contractService.deposit(address, amount);
+
+    if (!txHash) {
+      logger.error(`Failed to perform on-chain deposit for ${address}`);
+      return false;
+    }
+
     // Update database balance tracking
     databaseService.updateAgentBalance(address, amount, "deposit");
 
     logger.info(
-      `Deposit: ${address.slice(0, 10)}... deposited ${this.formatMON(amount)} MON`,
+      `Deposit: ${address.slice(0, 10)}... deposited ${this.formatMON(amount)} MON (TX: ${txHash})`,
     );
     return true;
   }
@@ -151,6 +159,16 @@ export class WagerService {
     }
 
     // Record wager (actual debit happens on-chain)
+    // Perform on-chain wager first
+    const txHash = await contractService.placeWager(address, gameId);
+
+    if (!txHash) {
+      return {
+        success: false,
+        error: "Failed to place on-chain wager",
+      };
+    }
+
     gameWager.wagers.set(key, this.wagerAmount);
     gameWager.totalPot += this.wagerAmount;
 
@@ -158,7 +176,7 @@ export class WagerService {
     databaseService.updateAgentBalance(address, -this.wagerAmount, "wager");
 
     logger.info(
-      `Wager submitted: ${address.slice(0, 10)}... wagered ${this.formatMON(this.wagerAmount)} MON for game ${gameId} (pot: ${this.formatMON(gameWager.totalPot)} MON)`,
+      `Wager submitted: ${address.slice(0, 10)}... wagered ${this.formatMON(this.wagerAmount)} MON for game ${gameId} (TX: ${txHash}, pot: ${this.formatMON(gameWager.totalPot)} MON)`,
     );
 
     return { success: true };

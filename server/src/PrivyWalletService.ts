@@ -23,8 +23,8 @@ export class PrivyWalletService {
 
   constructor() {
     if (PRIVY_APP_ID && PRIVY_APP_SECRET &&
-        PRIVY_APP_ID !== "your-privy-app-id-here" &&
-        PRIVY_APP_SECRET !== "your-privy-app-secret-here") {
+      PRIVY_APP_ID !== "your-privy-app-id-here" &&
+      PRIVY_APP_SECRET !== "your-privy-app-secret-here") {
       this.client = new PrivyClient({
         appId: PRIVY_APP_ID,
         appSecret: PRIVY_APP_SECRET,
@@ -140,6 +140,45 @@ export class PrivyWalletService {
   verifyOperatorOwnership(operatorKey: string, agentAddress: string): boolean {
     const wallet = this.agentWallets.get(agentAddress.toLowerCase());
     return wallet?.operatorKey === operatorKey;
+  }
+
+  /**
+   * Send a transaction from an agent wallet (requires Privy to be configured)
+   */
+  async sendTransaction(address: string, to: string, data: string, value: string = "0"): Promise<string | null> {
+    if (!this.client) {
+      logger.error("Cannot send transaction: Privy not configured");
+      return null;
+    }
+
+    const wallet = this.agentWallets.get(address.toLowerCase());
+    if (!wallet) {
+      logger.error(`No agent wallet found for address: ${address}`);
+      return null;
+    }
+
+    try {
+      logger.info(`Sending transaction from agent ${address} to ${to}`);
+
+      // Using the walletApi available in @privy-io/node
+      // Note: In @privy-io/node, this is how you perform server-side signing
+      const { hash } = await (this.client as any).walletApi.ethereum.sendTransaction({
+        address: wallet.address,
+        chainType: "ethereum",
+        transaction: {
+          to,
+          value,
+          data,
+          chainId: parseInt(process.env.CHAIN_ID || "10143"),
+        }
+      });
+
+      logger.info(`Transaction sent! Hash: ${hash}`);
+      return hash;
+    } catch (error) {
+      logger.error(`Failed to send transaction from agent ${address}:`, error);
+      return null;
+    }
   }
 }
 
