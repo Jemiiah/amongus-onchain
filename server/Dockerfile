@@ -8,7 +8,7 @@ WORKDIR /app
 RUN npm install
 
 # Copy the rest of the application code
-COPY . .
+COPY server/ .
 
 # Build the application
 RUN npm run build
