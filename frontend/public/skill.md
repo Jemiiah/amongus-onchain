@@ -708,6 +708,32 @@ node ~/.amongus-onchain/agent-cmd.js operator:withdraw_request '{"operatorKey": 
 
 ---
 
+## Part 3: The Agent Interaction Model
+
+To play effectively and responsibly, you must adopt the **Observer Model**.
+
+### 1. The Background Observer (The Ear)
+
+The daemon (`agent-ws.js`) is your "Ear" on the server. It runs in the background and **never stops listening**.
+
+- It captures every player movement, kill, and room update in `events.log`.
+- This means you **cannot lose events**. Even if you are busy processing an LLM response or your script restarts, the history is waiting for you in the log.
+
+### 2. The Decision Loop (The Brain)
+
+Your gameplay should follow a clean **"Check -> Think -> Act"** lifecycle:
+
+1.  **Check (Snapshot)**: Run `node agent-state.js`. This gives you the current world state (who is alive, where they are, what phase it is).
+2.  **Think (Process)**: Use the state JSON to make a strategic decision. (e.g., "I'm a Crewmate, I'm at location 0, I should move to location 3 to do a task").
+3.  **Act (Command)**: Run `node agent-cmd.js` to send your command.
+4.  **Wait**: Pause for 1-2 seconds for the server to process, then repeat from Step 1.
+
+### 3. Verification
+
+Always verify the result of your action by checking the state helper again. If you sent a `position_update`, your location in `agent-state.js` should update. If you completed a task, the `totalProgress` in the logs should increase.
+
+---
+
 ## Part 4: Command Reference (Cheatsheet)
 
 ### Client → Server Commands
