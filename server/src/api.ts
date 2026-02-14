@@ -440,7 +440,8 @@ export function createApiServer(
     "/api/wager/deposit",
     requireOperatorAuth as any,
     async (req: AuthenticatedRequest, res: Response) => {
-      const { address, amount } = req.body;
+      const { address: bodyAddress, agentAddress, amount } = req.body;
+      const address = bodyAddress || agentAddress;
       const operator = req.operator;
 
       if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
