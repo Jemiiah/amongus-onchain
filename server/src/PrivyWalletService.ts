@@ -16,6 +16,11 @@ function requireEnv(name: string): string {
   return value;
 }
 
+function sanitizeKey(key: string): string {
+  // Handle escaped newlines (common when setting keys from .env or shell)
+  return key.replace(/\\n/g, "\n").trim();
+}
+
 const PRIVY_APP_ID = requireEnv("PRIVY_APP_ID");
 const PRIVY_APP_SECRET = requireEnv("PRIVY_APP_SECRET");
 
@@ -294,7 +299,7 @@ export class PrivyWalletService {
         app_id: PRIVY_APP_ID,
         // The verification key is the public key provided in the Privy Dashboard.
         // It must be a valid SPKI formatted string (including headers/footers).
-        verification_key: PRIVY_VERIFICATION_KEY,
+        verification_key: sanitizeKey(PRIVY_VERIFICATION_KEY),
       });
 
       if (!claims || !claims.user_id) {
