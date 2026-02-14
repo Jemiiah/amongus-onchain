@@ -5,13 +5,11 @@ import "forge-std/Test.sol";
 import "../src/GameSettlement.sol";
 import "../src/WagerVault.sol";
 import "../src/AgentRegistry.sol";
-import "./MockERC20.sol";
 
 contract GameSettlementTest is Test {
     GameSettlement public settlement;
     WagerVault public vault;
     AgentRegistry public registry;
-    MockERC20 public token;
 
     address public owner = address(this);
     address public operator = address(0x100);
@@ -22,12 +20,11 @@ contract GameSettlementTest is Test {
     address public agent5 = address(0x5);
     address public agent6 = address(0x6);
 
-    uint256 public constant INITIAL_BALANCE = 1000 * 10**18;
+    uint256 public constant INITIAL_BALANCE = 1000 ether;
 
     function setUp() public {
-        token = new MockERC20();
         registry = new AgentRegistry();
-        vault = new WagerVault(address(registry), address(token));
+        vault = new WagerVault(address(registry));
         settlement = new GameSettlement(address(vault), address(registry));
 
         // Configure contracts
@@ -36,14 +33,12 @@ contract GameSettlementTest is Test {
         registry.setWagerVault(address(vault));
         settlement.setOperator(operator);
 
-        // Fund agents
+        // Fund agents with native MON and deposit
         address[6] memory agents = [agent1, agent2, agent3, agent4, agent5, agent6];
         for (uint i = 0; i < agents.length; i++) {
-            token.mint(agents[i], INITIAL_BALANCE);
+            vm.deal(agents[i], INITIAL_BALANCE);
             vm.prank(agents[i]);
-            token.approve(address(vault), type(uint256).max);
-            vm.prank(agents[i]);
-            vault.deposit(100 * 10**18);
+            vault.deposit{value: 100 ether}();
         }
     }
 
@@ -429,10 +424,10 @@ contract GameSettlementTest is Test {
         settlement.settleGame(gameId, true, winners, kills, tasks);
 
         // 5. Verify outcomes
-        // Total pot: 6 * 10 tokens = 60 tokens
-        // Protocol fee: 5% = 3 tokens
-        // Distributable: 57 tokens
-        // Per winner: 57 / 4 = 14.25 tokens
+        // Total pot: 6 * 10 ether = 60 ether
+        // Protocol fee: 5% = 3 ether
+        // Distributable: 57 ether
+        // Per winner: 57 / 4 = 14.25 ether
 
         uint256 wagerAmount = vault.wagerAmount();
         uint256 totalPot = wagerAmount * 6;
@@ -443,8 +438,8 @@ contract GameSettlementTest is Test {
         assertEq(vault.getBalance(agent3), agent3BalanceBeforeGame + winningsPerPlayer);
 
         // Loser should have: original balance (wager was lost, not returned)
-        // agent1 had 90 tokens after wager, now still 90
-        assertEq(vault.getBalance(agent1), 90 * 10**18);
+        // agent1 had 90 ether after wager, now still 90
+        assertEq(vault.getBalance(agent1), 90 ether);
 
         // Protocol fee collected
         assertEq(vault.getBalance(owner), protocolFee);
@@ -462,4 +457,7 @@ contract GameSettlementTest is Test {
         assertEq(losses, 1);
         assertEq(agentKills, 1);
     }
+
+    // Allow this contract to receive MON
+    receive() external payable {}
 }

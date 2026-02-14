@@ -1,4 +1,6 @@
 import { createLogger } from "./logger.js";
+import { contractService } from "./ContractService.js";
+import { databaseService } from "./DatabaseService.js";
 
 const logger = createLogger("wager-service");
 
@@ -22,16 +24,18 @@ interface GameWager {
 
 /**
  * Service for managing agent wagers
- * Tracks deposits, wagers, and winnings
+ * Balances are queried from on-chain, wagers tracked in-memory for active games
  */
 export class WagerService {
-  private balances: Map<string, AgentBalance> = new Map();
+  // Removed: private balances - balances now come from on-chain
   private gameWagers: Map<string, GameWager> = new Map();
   private wagerAmount: bigint;
 
   constructor(wagerAmount: bigint = DEFAULT_WAGER_AMOUNT) {
     this.wagerAmount = wagerAmount;
-    logger.info(`Wager service initialized with wager amount: ${this.formatMON(wagerAmount)} MON`);
+    logger.info(
+      `Wager service initialized with wager amount: ${this.formatMON(wagerAmount)} MON`,
+    );
   }
 
   /**
@@ -50,71 +54,87 @@ export class WagerService {
   }
 
   /**
-   * Get or create agent balance record
-   */
-  private getOrCreateBalance(address: string): AgentBalance {
-    const key = address.toLowerCase();
-    let balance = this.balances.get(key);
-    if (!balance) {
-      balance = {
-        address: key,
-        balance: BigInt(0),
-        totalDeposited: BigInt(0),
-        totalWon: BigInt(0),
-        totalLost: BigInt(0),
-      };
-      this.balances.set(key, balance);
-    }
-    return balance;
-  }
-
-  /**
    * Deposit funds to an agent's balance
-   * In production, this would be triggered by on-chain deposit events
+   * This syncs the database after an on-chain deposit event
    */
-  deposit(address: string, amount: bigint): boolean {
-    const balance = this.getOrCreateBalance(address);
-    balance.balance += amount;
-    balance.totalDeposited += amount;
-    logger.info(`Deposit: ${address.slice(0, 10)}... deposited ${this.formatMON(amount)} MON (new balance: ${this.formatMON(balance.balance)} MON)`);
+  async deposit(address: string, amount: bigint): Promise<boolean> {
+    // Perform on-chain deposit first
+    const txHash = await contractService.deposit(address, amount);
+
+    if (!txHash) {
+      logger.error(`Failed to perform on-chain deposit for ${address}`);
+      return false;
+    }
+
+    // Update database balance tracking
+    databaseService.updateAgentBalance(address, amount, "deposit");
+
+    logger.info(
+      `Deposit: ${address.slice(0, 10)}... deposited ${this.formatMON(amount)} MON (TX: ${txHash})`,
+    );
     return true;
   }
 
   /**
-   * Get agent's current balance
+   * Get agent's current balance from on-chain (wager balance)
+   * This is the source of truth for balances
    */
-  getBalance(address: string): bigint {
-    const balance = this.balances.get(address.toLowerCase());
-    return balance?.balance ?? BigInt(0);
+  async getBalance(address: string): Promise<bigint> {
+    // Query on-chain balance (source of truth)
+    const onChainBalance = await contractService.getBalance(address);
+    return onChainBalance;
   }
 
   /**
-   * Get full balance info for an agent
+   * Get agent's actual wallet balance (native MON)
    */
-  getBalanceInfo(address: string): AgentBalance | null {
-    return this.balances.get(address.toLowerCase()) ?? null;
+  async getWalletBalance(address: string): Promise<bigint> {
+    return await contractService.getWalletBalance(address);
+  }
+
+  /**
+   * Get full balance info for an agent from database
+   * Includes totalDeposited, totalWon, totalLost
+   */
+  async getBalanceInfo(address: string): Promise<AgentBalance | null> {
+    // Get from database which tracks historical data
+    const agent = await databaseService.getAgentByWallet(address);
+    if (!agent) return null;
+
+    return {
+      address: agent.walletAddress,
+      balance: BigInt(agent.balance),
+      totalDeposited: BigInt(agent.totalDeposited),
+      totalWon: BigInt(agent.totalWon),
+      totalLost: BigInt(agent.totalLost),
+    };
   }
 
   /**
    * Check if agent can afford the wager
    */
-  canAffordWager(address: string): boolean {
-    return this.getBalance(address) >= this.wagerAmount;
+  async canAffordWager(address: string): Promise<boolean> {
+    const balance = await this.getBalance(address);
+    return balance >= this.wagerAmount;
   }
 
   /**
    * Submit wager to join a game
-   * Debits the wager amount from agent's balance
+   * NOTE: Wagers should be placed on-chain first, then synced here
+   * This method is deprecated in favor of on-chain wager placement
    */
-  submitWager(gameId: string, address: string): { success: boolean; error?: string } {
+  async submitWager(
+    gameId: string,
+    address: string,
+  ): Promise<{ success: boolean; error?: string }> {
     const key = address.toLowerCase();
-    const balance = this.getOrCreateBalance(key);
 
-    // Check balance
-    if (balance.balance < this.wagerAmount) {
+    // Check on-chain balance
+    const balance = await this.getBalance(key);
+    if (balance < this.wagerAmount) {
       return {
         success: false,
-        error: `Insufficient balance. Need ${this.formatMON(this.wagerAmount)} MON, have ${this.formatMON(balance.balance)} MON`,
+        error: `Insufficient balance. Need ${this.formatMON(this.wagerAmount)} MON, have ${this.formatMON(balance)} MON`,
       };
     }
 
@@ -138,14 +158,26 @@ export class WagerService {
       };
     }
 
-    // Debit balance
-    balance.balance -= this.wagerAmount;
+    // Record wager (actual debit happens on-chain)
+    // Perform on-chain wager first
+    const txHash = await contractService.placeWager(address, gameId);
 
-    // Record wager
+    if (!txHash) {
+      return {
+        success: false,
+        error: "Failed to place on-chain wager",
+      };
+    }
+
     gameWager.wagers.set(key, this.wagerAmount);
     gameWager.totalPot += this.wagerAmount;
 
-    logger.info(`Wager submitted: ${address.slice(0, 10)}... wagered ${this.formatMON(this.wagerAmount)} MON for game ${gameId} (pot: ${this.formatMON(gameWager.totalPot)} MON)`);
+    // Update database
+    databaseService.updateAgentBalance(address, -this.wagerAmount, "wager");
+
+    logger.info(
+      `Wager submitted: ${address.slice(0, 10)}... wagered ${this.formatMON(this.wagerAmount)} MON for game ${gameId} (TX: ${txHash}, pot: ${this.formatMON(gameWager.totalPot)} MON)`,
+    );
 
     return { success: true };
   }
@@ -200,27 +232,35 @@ export class WagerService {
   /**
    * Distribute winnings when game ends
    * Winners split the pot equally
+   * Updates database to track winnings and losses
    */
   distributeWinnings(
     gameId: string,
     winners: string[],
-    losers: string[]
+    losers: string[],
   ): { success: boolean; winningsPerPlayer: bigint; error?: string } {
     const gameWager = this.gameWagers.get(gameId);
 
     if (!gameWager) {
-      return { success: false, winningsPerPlayer: BigInt(0), error: "No wagers found for game" };
+      return {
+        success: false,
+        winningsPerPlayer: BigInt(0),
+        error: "No wagers found for game",
+      };
     }
 
     if (gameWager.settled) {
-      return { success: false, winningsPerPlayer: BigInt(0), error: "Game already settled" };
+      return {
+        success: false,
+        winningsPerPlayer: BigInt(0),
+        error: "Game already settled",
+      };
     }
 
     if (winners.length === 0) {
       // No winners - refund everyone
       for (const [address, amount] of gameWager.wagers) {
-        const balance = this.getOrCreateBalance(address);
-        balance.balance += amount;
+        databaseService.updateAgentBalance(address, amount, "refund");
       }
       gameWager.settled = true;
       logger.info(`Game ${gameId} refunded - no winners`);
@@ -231,33 +271,40 @@ export class WagerService {
     const winningsPerPlayer = gameWager.totalPot / BigInt(winners.length);
     const remainder = gameWager.totalPot % BigInt(winners.length);
 
-    // Credit winners
+    // Credit winners in database
     for (let i = 0; i < winners.length; i++) {
       const address = winners[i].toLowerCase();
-      const balance = this.getOrCreateBalance(address);
       // First winner gets any remainder
-      const winnings = i === 0 ? winningsPerPlayer + remainder : winningsPerPlayer;
-      balance.balance += winnings;
-      balance.totalWon += winnings;
-      logger.info(`Winner: ${address.slice(0, 10)}... received ${this.formatMON(winnings)} MON`);
+      const winnings =
+        i === 0 ? winningsPerPlayer + remainder : winningsPerPlayer;
+
+      // Update database (on-chain settlement happens separately)
+      databaseService.updateAgentBalance(address, winnings, "winnings");
+
+      logger.info(
+        `Winner: ${address.slice(0, 10)}... received ${this.formatMON(winnings)} MON`,
+      );
     }
 
-    // Record losses
+    // Record losses in database
     for (const address of losers) {
-      const balance = this.getOrCreateBalance(address.toLowerCase());
-      const wagerAmount = gameWager.wagers.get(address.toLowerCase()) ?? BigInt(0);
-      balance.totalLost += wagerAmount;
+      const wagerAmount =
+        gameWager.wagers.get(address.toLowerCase()) ?? BigInt(0);
+      // Loss is already recorded when wager was placed, no need to update again
     }
 
     gameWager.settled = true;
 
-    logger.info(`Game ${gameId} settled: ${winners.length} winners split ${this.formatMON(gameWager.totalPot)} MON pot (${this.formatMON(winningsPerPlayer)} MON each)`);
+    logger.info(
+      `Game ${gameId} settled: ${winners.length} winners split ${this.formatMON(gameWager.totalPot)} MON pot (${this.formatMON(winningsPerPlayer)} MON each)`,
+    );
 
     return { success: true, winningsPerPlayer };
   }
 
   /**
    * Refund all wagers for a game (e.g., if game is cancelled)
+   * Updates database to refund balances
    */
   refundGame(gameId: string): boolean {
     const gameWager = this.gameWagers.get(gameId);
@@ -265,13 +312,15 @@ export class WagerService {
       return false;
     }
 
+    // Refund all players in database
     for (const [address, amount] of gameWager.wagers) {
-      const balance = this.getOrCreateBalance(address);
-      balance.balance += amount;
+      databaseService.updateAgentBalance(address, amount, "refund");
     }
 
     gameWager.settled = true;
-    logger.info(`Game ${gameId} refunded: ${gameWager.wagers.size} players refunded`);
+    logger.info(
+      `Game ${gameId} refunded: ${gameWager.wagers.size} players refunded`,
+    );
     return true;
   }
 
@@ -293,12 +342,17 @@ export class WagerService {
   }
 
   /**
-   * Get leaderboard by total winnings
+   * Get leaderboard by total winnings from database
    */
-  getWinningsLeaderboard(limit: number = 10): AgentBalance[] {
-    return Array.from(this.balances.values())
-      .sort((a, b) => Number(b.totalWon - a.totalWon))
-      .slice(0, limit);
+  async getWinningsLeaderboard(limit: number = 10): Promise<AgentBalance[]> {
+    const agents = await databaseService.getLeaderboard(limit);
+    return (agents as any[]).map((agent: any) => ({
+      address: agent.walletAddress,
+      balance: BigInt(0),
+      totalDeposited: BigInt(0),
+      totalWon: BigInt(0),
+      totalLost: BigInt(0),
+    }));
   }
 }
 

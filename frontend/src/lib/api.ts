@@ -81,7 +81,9 @@ export const api = {
   },
 
   // Get leaderboard
-  async getLeaderboard(limit = 10): Promise<{ agents: AgentStats[]; timestamp: number }> {
+  async getLeaderboard(
+    limit = 10,
+  ): Promise<{ agents: AgentStats[]; timestamp: number }> {
     const res = await fetch(`${API_URL}/api/leaderboard?limit=${limit}`);
     if (!res.ok) throw new Error("Failed to fetch leaderboard");
     return res.json();
@@ -112,7 +114,9 @@ export const api = {
   },
 
   // List agents for operator (requires operator key auth)
-  async listAgents(operatorKey: string): Promise<{ agents: AgentWallet[]; count: number }> {
+  async listAgents(
+    operatorKey: string,
+  ): Promise<{ agents: AgentWallet[]; count: number }> {
     const res = await fetch(`${API_URL}/api/agents`, {
       headers: {
         Authorization: `Bearer ${operatorKey}`,
@@ -145,7 +149,7 @@ export const api = {
   // Register an operator key (user provides their own key)
   async registerOperatorKey(
     operatorKey: string,
-    walletAddress: string
+    walletAddress: string,
   ): Promise<{
     success: boolean;
     walletAddress: string;
@@ -162,10 +166,17 @@ export const api = {
     });
 
     if (res.status === 409) {
-      return { success: false, walletAddress, createdAt: 0, error: "Key already registered" };
+      return {
+        success: false,
+        walletAddress,
+        createdAt: 0,
+        error: "Key already registered",
+      };
     }
     if (!res.ok) {
-      const data = await res.json().catch(() => ({ error: "Registration failed" }));
+      const data = await res
+        .json()
+        .catch(() => ({ error: "Registration failed" }));
       throw new Error(data.error || "Failed to register operator key");
     }
     return res.json();
@@ -184,6 +195,24 @@ export const api = {
     });
     if (res.status === 401) return { valid: false };
     if (!res.ok) throw new Error("Failed to validate operator key");
+    return res.json();
+  },
+
+  // Get active operator key using Privy access token
+  async getActiveOperatorKey(token: string): Promise<{
+    success: boolean;
+    operatorKey?: string;
+    walletAddress?: string;
+    createdAt?: number;
+    error?: string;
+  }> {
+    const res = await fetch(`${API_URL}/api/operators/active`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (res.status === 404) return { success: false, error: "Not found" };
+    if (!res.ok) throw new Error("Failed to fetch active operator key");
     return res.json();
   },
 };

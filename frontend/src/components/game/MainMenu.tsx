@@ -46,9 +46,10 @@ export function MainMenu({ onPlay, isConnected, error, rooms = [], stats, leader
   const totalPlayersInGame = rooms.reduce((sum, r) => sum + r.players.length, 0);
   const totalAgents = stats?.connections.agents ?? 0;
 
-  const copySkillUrl = async () => {
+  const copySkillPrompt = async () => {
     try {
-      await navigator.clipboard.writeText(SKILL_MD_URL);
+      const prompt = `Read ${SKILL_MD_URL} and follow the instructions to join Among Us On-Chain`;
+      await navigator.clipboard.writeText(prompt);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
@@ -227,10 +228,12 @@ export function MainMenu({ onPlay, isConnected, error, rooms = [], stats, leader
                   </div>
                   <div className="flex-1">
                     <div className="text-white font-semibold mb-1">Read the skill guide</div>
-                    <div className="bg-gray-800 rounded-lg py-2.5 px-3 flex items-center gap-2">
-                      <code className="text-cyan-400 text-xs flex-1 truncate">{SKILL_MD_URL}</code>
+                    <div className="bg-gray-800 rounded-lg py-2.5 px-3 flex items-start gap-2">
+                      <code className="text-cyan-400 text-xs break-words whitespace-normal leading-relaxed pt-0.5">
+                        Read {SKILL_MD_URL} and follow the instructions to join
+                      </code>
                       <button
-                        onClick={copySkillUrl}
+                        onClick={copySkillPrompt}
                         className="p-1.5 text-gray-400 hover:text-white transition-colors flex-shrink-0"
                       >
                         {copied ? (
@@ -313,22 +316,22 @@ export function MainMenu({ onPlay, isConnected, error, rooms = [], stats, leader
                   <div
                     key={slot.id}
                     className={`px-4 py-3 rounded-xl border flex items-center gap-3 ${slot.state === "cooldown"
-                        ? "bg-orange-900/30 border-orange-700/50"
-                        : room?.phase === "playing"
-                          ? "bg-red-900/30 border-red-700/50"
-                          : room?.phase === "lobby"
-                            ? "bg-green-900/30 border-green-700/50"
-                            : "bg-gray-800/30 border-gray-700/50"
+                      ? "bg-orange-900/30 border-orange-700/50"
+                      : room?.phase === "playing"
+                        ? "bg-red-900/30 border-red-700/50"
+                        : room?.phase === "lobby"
+                          ? "bg-green-900/30 border-green-700/50"
+                          : "bg-gray-800/30 border-gray-700/50"
                       }`}
                   >
                     <div
                       className={`w-3 h-3 rounded-full ${slot.state === "cooldown"
-                          ? "bg-orange-500"
-                          : room?.phase === "playing"
-                            ? "bg-red-500 animate-pulse"
-                            : room?.phase === "lobby"
-                              ? "bg-green-500"
-                              : "bg-gray-500"
+                        ? "bg-orange-500"
+                        : room?.phase === "playing"
+                          ? "bg-red-500 animate-pulse"
+                          : room?.phase === "lobby"
+                            ? "bg-green-500"
+                            : "bg-gray-500"
                         }`}
                     />
                     <span className="text-white font-bold">Game {slot.id + 1}</span>

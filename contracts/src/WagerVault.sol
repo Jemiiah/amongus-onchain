@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "./interfaces/IERC20.sol";
 import "./AgentRegistry.sol";
 
 /**
  * @title WagerVault
- * @notice Escrow contract for Among Us on-chain game wagers using Monad tokens
- * @dev Holds ERC20 token deposits, manages game wagers, and distributes winnings
+ * @notice Escrow contract for Among Us on-chain game wagers using native MON
+ * @dev Holds native MON deposits, manages game wagers, and distributes winnings
  */
 contract WagerVault {
     // ============ State Variables ============
@@ -15,9 +14,8 @@ contract WagerVault {
     address public owner;
     address public gameSettlement;
     AgentRegistry public agentRegistry;
-    IERC20 public wagerToken; // Monad token
 
-    uint256 public wagerAmount = 10 * 10**18; // Default: 10 tokens
+    uint256 public wagerAmount = 10 * 10**18; // Default: 10 MON
     uint256 public protocolFeePercent = 5; // 5% protocol fee
 
     // Agent balances (deposited funds)
@@ -43,7 +41,6 @@ contract WagerVault {
     event GameRefunded(bytes32 indexed gameId, uint256 playersRefunded);
     event WagerAmountUpdated(uint256 oldAmount, uint256 newAmount);
     event ProtocolFeeUpdated(uint256 oldFee, uint256 newFee);
-    event TokenUpdated(address oldToken, address newToken);
 
     // ============ Modifiers ============
 
@@ -59,46 +56,40 @@ contract WagerVault {
 
     // ============ Constructor ============
 
-    constructor(address _agentRegistry, address _wagerToken) {
+    constructor(address _agentRegistry) {
         owner = msg.sender;
         agentRegistry = AgentRegistry(_agentRegistry);
-        wagerToken = IERC20(_wagerToken);
     }
 
     // ============ Deposit & Withdraw ============
 
     /**
-     * @notice Deposit Monad tokens to your balance
-     * @param amount Amount of tokens to deposit
-     * @dev Requires prior approval of tokens to this contract
+     * @notice Deposit native MON to your balance
+     * @dev Send MON with the transaction
      */
-    function deposit(uint256 amount) external {
-        require(amount > 0, "Must deposit something");
+    function deposit() external payable {
+        require(msg.value > 0, "Must deposit something");
 
-        // Transfer tokens from sender to this contract
-        bool success = wagerToken.transferFrom(msg.sender, address(this), amount);
-        require(success, "Token transfer failed");
-
-        balances[msg.sender] += amount;
+        balances[msg.sender] += msg.value;
 
         // Register agent if not already registered
         if (!agentRegistry.isRegistered(msg.sender)) {
             agentRegistry.registerAgent(msg.sender, "");
         }
 
-        emit Deposited(msg.sender, amount, balances[msg.sender]);
+        emit Deposited(msg.sender, msg.value, balances[msg.sender]);
     }
 
     /**
-     * @notice Withdraw tokens from your balance
+     * @notice Withdraw native MON from your balance
      * @param amount Amount to withdraw
      */
     function withdraw(uint256 amount) external {
         require(balances[msg.sender] >= amount, "Insufficient balance");
         balances[msg.sender] -= amount;
 
-        bool success = wagerToken.transfer(msg.sender, amount);
-        require(success, "Token transfer failed");
+        (bool success, ) = payable(msg.sender).call{value: amount}("");
+        require(success, "Transfer failed");
 
         emit Withdrawn(msg.sender, amount, balances[msg.sender]);
     }
@@ -227,14 +218,6 @@ contract WagerVault {
     }
 
     /**
-     * @notice Update the wager token address
-     */
-    function setWagerToken(address _wagerToken) external onlyOwner {
-        emit TokenUpdated(address(wagerToken), _wagerToken);
-        wagerToken = IERC20(_wagerToken);
-    }
-
-    /**
      * @notice Update the wager amount
      */
     function setWagerAmount(uint256 _wagerAmount) external onlyOwner {
@@ -267,14 +250,22 @@ contract WagerVault {
         require(ownerBalance > 0, "No fees to withdraw");
         balances[owner] = 0;
 
-        bool success = wagerToken.transfer(owner, ownerBalance);
-        require(success, "Token transfer failed");
+        (bool success, ) = payable(owner).call{value: ownerBalance}("");
+        require(success, "Transfer failed");
     }
 
     /**
-     * @notice Get contract's total token balance
+     * @notice Get contract's total MON balance
      */
     function getContractBalance() external view returns (uint256) {
-        return wagerToken.balanceOf(address(this));
+        return address(this).balance;
+    }
+
+    /**
+     * @notice Allow contract to receive MON
+     */
+    receive() external payable {
+        balances[msg.sender] += msg.value;
+        emit Deposited(msg.sender, msg.value, balances[msg.sender]);
     }
 }

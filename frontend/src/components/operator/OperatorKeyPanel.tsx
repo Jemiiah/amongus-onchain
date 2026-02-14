@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { usePrivy } from "@privy-io/react-auth";
 import { usePrivyEnabled } from "@/components/layout/Providers";
 import { generateOperatorKey } from "@/lib/operatorKeys";
+import { api } from "@/lib/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 const STORAGE_KEY = "amongus-operator-key";
@@ -17,7 +18,7 @@ interface OperatorKeyData {
 
 export function OperatorKeyPanel() {
   const privyEnabled = usePrivyEnabled();
-  const { authenticated, user } = usePrivy();
+  const { authenticated, user, getAccessToken } = usePrivy();
 
   const [operatorKey, setOperatorKey] = useState<OperatorKeyData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -117,7 +118,7 @@ export function OperatorKeyPanel() {
     const initKey = async () => {
       setInitialized(true);
 
-      // If we have a saved key, validate it
+      // 1. If we have a saved key in localStorage, validate it
       if (operatorKey) {
         const isValid = await validateKeyWithServer(operatorKey.operatorKey);
         if (isValid) {
@@ -130,17 +131,37 @@ export function OperatorKeyPanel() {
           return; // Successfully registered existing key
         }
 
-        // Key couldn't be registered (maybe used by someone else), clear it
+        // Key couldn't be registered, clear it
         localStorage.removeItem(`${STORAGE_KEY}-${walletAddress.toLowerCase()}`);
         setOperatorKey(null);
       }
 
-      // No valid key, generate a new one
+      // 2. No valid key in localStorage, try to fetch from backend using Privy auth
+      try {
+        const token = await getAccessToken();
+        if (token) {
+          const result = await api.getActiveOperatorKey(token);
+          if (result.success && result.operatorKey) {
+            const keyData: OperatorKeyData = {
+              operatorKey: result.operatorKey,
+              walletAddress: walletAddress.toLowerCase(),
+              createdAt: result.createdAt || Date.now(),
+            };
+            localStorage.setItem(`${STORAGE_KEY}-${walletAddress.toLowerCase()}`, JSON.stringify(keyData));
+            setOperatorKey(keyData);
+            return; // Successfully recovered key from backend
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch active operator key from backend:", err);
+      }
+
+      // 3. No valid key anywhere, generate a new one
       await generateAndRegisterKey();
     };
 
     initKey();
-  }, [walletAddress, operatorKey, loading, initialized, validateKeyWithServer, registerKeyWithServer, generateAndRegisterKey]);
+  }, [walletAddress, operatorKey, loading, initialized, validateKeyWithServer, registerKeyWithServer, generateAndRegisterKey, getAccessToken]);
 
   // Reset initialized when wallet changes
   useEffect(() => {

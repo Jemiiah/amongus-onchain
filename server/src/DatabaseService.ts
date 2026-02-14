@@ -168,15 +168,23 @@ export class DatabaseService {
     walletAddress: string;
     name: string;
     operatorId: string;
+    privyUserId?: string;
+    privyWalletId?: string;
   }): void {
     this.queueWrite(async () => {
       await this.prisma.agent.upsert({
         where: { walletAddress: data.walletAddress.toLowerCase() },
-        update: { name: data.name },
+        update: {
+          name: data.name,
+          privyUserId: data.privyUserId,
+          privyWalletId: data.privyWalletId,
+        },
         create: {
           walletAddress: data.walletAddress.toLowerCase(),
           name: data.name,
           operatorId: data.operatorId,
+          privyUserId: data.privyUserId,
+          privyWalletId: data.privyWalletId,
         },
       });
       logger.debug(`Upserted agent: ${data.name} (${data.walletAddress})`);
@@ -197,6 +205,22 @@ export class DatabaseService {
     } catch (error) {
       logger.error("Failed to get agent:", error);
       return null;
+    }
+  }
+
+  /**
+   * Get all agents
+   */
+  async getAllAgents() {
+    if (!this.enabled) return [];
+
+    try {
+      return await this.prisma.agent.findMany({
+        include: { operator: true },
+      });
+    } catch (error) {
+      logger.error("Failed to get all agents:", error);
+      return [];
     }
   }
 

@@ -4,12 +4,10 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "../src/WagerVault.sol";
 import "../src/AgentRegistry.sol";
-import "./MockERC20.sol";
 
 contract WagerVaultTest is Test {
     WagerVault public vault;
     AgentRegistry public registry;
-    MockERC20 public token;
 
     address public owner = address(this);
     address public gameSettlement = address(0x100);
@@ -17,48 +15,39 @@ contract WagerVaultTest is Test {
     address public agent2 = address(0x2);
     address public agent3 = address(0x3);
 
-    uint256 public constant INITIAL_BALANCE = 1000 * 10**18;
-    uint256 public constant WAGER_AMOUNT = 10 * 10**18;
+    uint256 public constant INITIAL_BALANCE = 1000 ether;
+    uint256 public constant WAGER_AMOUNT = 10 ether;
 
     function setUp() public {
-        token = new MockERC20();
         registry = new AgentRegistry();
-        vault = new WagerVault(address(registry), address(token));
+        vault = new WagerVault(address(registry));
 
         vault.setGameSettlement(gameSettlement);
         registry.setWagerVault(address(vault));
 
-        // Fund agents with tokens
-        token.mint(agent1, INITIAL_BALANCE);
-        token.mint(agent2, INITIAL_BALANCE);
-        token.mint(agent3, INITIAL_BALANCE);
-
-        // Approve vault to spend tokens
-        vm.prank(agent1);
-        token.approve(address(vault), type(uint256).max);
-        vm.prank(agent2);
-        token.approve(address(vault), type(uint256).max);
-        vm.prank(agent3);
-        token.approve(address(vault), type(uint256).max);
+        // Fund agents with native MON
+        vm.deal(agent1, INITIAL_BALANCE);
+        vm.deal(agent2, INITIAL_BALANCE);
+        vm.deal(agent3, INITIAL_BALANCE);
     }
 
     // ============ Deposit Tests ============
 
     function test_Deposit() public {
-        uint256 depositAmount = 100 * 10**18;
+        uint256 depositAmount = 100 ether;
 
         vm.prank(agent1);
-        vault.deposit(depositAmount);
+        vault.deposit{value: depositAmount}();
 
         assertEq(vault.getBalance(agent1), depositAmount);
-        assertEq(token.balanceOf(address(vault)), depositAmount);
+        assertEq(address(vault).balance, depositAmount);
     }
 
     function test_DepositRegistersAgent() public {
         assertFalse(registry.isRegistered(agent1));
 
         vm.prank(agent1);
-        vault.deposit(100 * 10**18);
+        vault.deposit{value: 100 ether}();
 
         assertTrue(registry.isRegistered(agent1));
     }
@@ -66,47 +55,55 @@ contract WagerVaultTest is Test {
     function test_DepositZeroAmount() public {
         vm.prank(agent1);
         vm.expectRevert("Must deposit something");
-        vault.deposit(0);
+        vault.deposit{value: 0}();
     }
 
     function test_DepositMultiple() public {
         vm.startPrank(agent1);
-        vault.deposit(50 * 10**18);
-        vault.deposit(30 * 10**18);
+        vault.deposit{value: 50 ether}();
+        vault.deposit{value: 30 ether}();
         vm.stopPrank();
 
-        assertEq(vault.getBalance(agent1), 80 * 10**18);
+        assertEq(vault.getBalance(agent1), 80 ether);
+    }
+
+    function test_DepositViaReceive() public {
+        vm.prank(agent1);
+        (bool success,) = address(vault).call{value: 100 ether}("");
+        assertTrue(success);
+        assertEq(vault.getBalance(agent1), 100 ether);
     }
 
     // ============ Withdraw Tests ============
 
     function test_Withdraw() public {
-        uint256 depositAmount = 100 * 10**18;
-        uint256 withdrawAmount = 40 * 10**18;
+        uint256 depositAmount = 100 ether;
+        uint256 withdrawAmount = 40 ether;
 
         vm.startPrank(agent1);
-        vault.deposit(depositAmount);
+        vault.deposit{value: depositAmount}();
+        uint256 balanceBefore = agent1.balance;
         vault.withdraw(withdrawAmount);
         vm.stopPrank();
 
         assertEq(vault.getBalance(agent1), depositAmount - withdrawAmount);
-        assertEq(token.balanceOf(agent1), INITIAL_BALANCE - depositAmount + withdrawAmount);
+        assertEq(agent1.balance, balanceBefore + withdrawAmount);
     }
 
     function test_WithdrawInsufficientBalance() public {
         vm.startPrank(agent1);
-        vault.deposit(50 * 10**18);
+        vault.deposit{value: 50 ether}();
 
         vm.expectRevert("Insufficient balance");
-        vault.withdraw(100 * 10**18);
+        vault.withdraw(100 ether);
         vm.stopPrank();
     }
 
     function test_WithdrawAll() public {
-        uint256 depositAmount = 100 * 10**18;
+        uint256 depositAmount = 100 ether;
 
         vm.startPrank(agent1);
-        vault.deposit(depositAmount);
+        vault.deposit{value: depositAmount}();
         vault.withdraw(depositAmount);
         vm.stopPrank();
 
@@ -119,12 +116,12 @@ contract WagerVaultTest is Test {
         bytes32 gameId = keccak256("game1");
 
         vm.startPrank(agent1);
-        vault.deposit(100 * 10**18);
+        vault.deposit{value: 100 ether}();
         vault.placeWager(gameId);
         vm.stopPrank();
 
         assertTrue(vault.hasWagered(gameId, agent1));
-        assertEq(vault.getBalance(agent1), 100 * 10**18 - WAGER_AMOUNT);
+        assertEq(vault.getBalance(agent1), 100 ether - WAGER_AMOUNT);
         assertEq(vault.getGamePot(gameId), WAGER_AMOUNT);
     }
 
@@ -132,7 +129,7 @@ contract WagerVaultTest is Test {
         bytes32 gameId = keccak256("game1");
 
         vm.startPrank(agent1);
-        vault.deposit(5 * 10**18); // Less than wager amount
+        vault.deposit{value: 5 ether}(); // Less than wager amount
 
         vm.expectRevert("Insufficient balance for wager");
         vault.placeWager(gameId);
@@ -143,7 +140,7 @@ contract WagerVaultTest is Test {
         bytes32 gameId = keccak256("game1");
 
         vm.startPrank(agent1);
-        vault.deposit(100 * 10**18);
+        vault.deposit{value: 100 ether}();
         vault.placeWager(gameId);
 
         vm.expectRevert("Already wagered");
@@ -155,11 +152,11 @@ contract WagerVaultTest is Test {
         bytes32 gameId = keccak256("game1");
 
         vm.prank(agent1);
-        vault.deposit(100 * 10**18);
+        vault.deposit{value: 100 ether}();
         vm.prank(agent2);
-        vault.deposit(100 * 10**18);
+        vault.deposit{value: 100 ether}();
         vm.prank(agent3);
-        vault.deposit(100 * 10**18);
+        vault.deposit{value: 100 ether}();
 
         vm.prank(agent1);
         vault.placeWager(gameId);
@@ -181,11 +178,11 @@ contract WagerVaultTest is Test {
 
         // Setup: 3 players wager
         vm.prank(agent1);
-        vault.deposit(100 * 10**18);
+        vault.deposit{value: 100 ether}();
         vm.prank(agent2);
-        vault.deposit(100 * 10**18);
+        vault.deposit{value: 100 ether}();
         vm.prank(agent3);
-        vault.deposit(100 * 10**18);
+        vault.deposit{value: 100 ether}();
 
         vm.prank(agent1);
         vault.placeWager(gameId);
@@ -194,9 +191,9 @@ contract WagerVaultTest is Test {
         vm.prank(agent3);
         vault.placeWager(gameId);
 
-        uint256 totalPot = WAGER_AMOUNT * 3; // 30 tokens
-        uint256 protocolFee = totalPot * 5 / 100; // 1.5 tokens
-        uint256 winningsPerPlayer = (totalPot - protocolFee) / 2; // 14.25 tokens each
+        uint256 totalPot = WAGER_AMOUNT * 3; // 30 ether
+        uint256 protocolFee = totalPot * 5 / 100; // 1.5 ether
+        uint256 winningsPerPlayer = (totalPot - protocolFee) / 2; // 14.25 ether each
 
         // Settle: agent1 and agent2 win
         address[] memory winners = new address[](2);
@@ -219,7 +216,7 @@ contract WagerVaultTest is Test {
         bytes32 gameId = keccak256("game1");
 
         vm.prank(agent1);
-        vault.deposit(100 * 10**18);
+        vault.deposit{value: 100 ether}();
         vm.prank(agent1);
         vault.placeWager(gameId);
 
@@ -238,7 +235,7 @@ contract WagerVaultTest is Test {
         bytes32 gameId = keccak256("game1");
 
         vm.prank(agent1);
-        vault.deposit(100 * 10**18);
+        vault.deposit{value: 100 ether}();
         vm.prank(agent1);
         vault.placeWager(gameId);
 
@@ -256,9 +253,9 @@ contract WagerVaultTest is Test {
         bytes32 gameId = keccak256("game1");
 
         vm.prank(agent1);
-        vault.deposit(100 * 10**18);
+        vault.deposit{value: 100 ether}();
         vm.prank(agent2);
-        vault.deposit(100 * 10**18);
+        vault.deposit{value: 100 ether}();
 
         uint256 agent1BalanceAfterDeposit = vault.getBalance(agent1);
         uint256 agent2BalanceAfterDeposit = vault.getBalance(agent2);
@@ -281,7 +278,7 @@ contract WagerVaultTest is Test {
         bytes32 gameId = keccak256("game1");
 
         vm.prank(agent1);
-        vault.deposit(100 * 10**18);
+        vault.deposit{value: 100 ether}();
         vm.prank(agent1);
         vault.placeWager(gameId);
 
@@ -299,7 +296,7 @@ contract WagerVaultTest is Test {
     // ============ Admin Tests ============
 
     function test_SetWagerAmount() public {
-        uint256 newAmount = 20 * 10**18;
+        uint256 newAmount = 20 ether;
         vault.setWagerAmount(newAmount);
         assertEq(vault.wagerAmount(), newAmount);
     }
@@ -314,18 +311,12 @@ contract WagerVaultTest is Test {
         vault.setProtocolFee(25);
     }
 
-    function test_SetWagerToken() public {
-        MockERC20 newToken = new MockERC20();
-        vault.setWagerToken(address(newToken));
-        assertEq(address(vault.wagerToken()), address(newToken));
-    }
-
     function test_WithdrawProtocolFees() public {
         bytes32 gameId = keccak256("game1");
 
         // Create a game and settle to generate fees
         vm.prank(agent1);
-        vault.deposit(100 * 10**18);
+        vault.deposit{value: 100 ether}();
         vm.prank(agent1);
         vault.placeWager(gameId);
 
@@ -338,10 +329,20 @@ contract WagerVaultTest is Test {
         uint256 ownerFees = vault.getBalance(owner);
         assertTrue(ownerFees > 0);
 
-        uint256 ownerTokensBefore = token.balanceOf(owner);
+        uint256 ownerBalanceBefore = owner.balance;
         vault.withdrawProtocolFees();
 
         assertEq(vault.getBalance(owner), 0);
-        assertEq(token.balanceOf(owner), ownerTokensBefore + ownerFees);
+        assertEq(owner.balance, ownerBalanceBefore + ownerFees);
     }
+
+    function test_GetContractBalance() public {
+        vm.prank(agent1);
+        vault.deposit{value: 100 ether}();
+
+        assertEq(vault.getContractBalance(), 100 ether);
+    }
+
+    // Allow this contract to receive MON
+    receive() external payable {}
 }

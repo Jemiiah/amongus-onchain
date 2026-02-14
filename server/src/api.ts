@@ -5,45 +5,47 @@ import { privyWalletService } from "./PrivyWalletService.js";
 import { wagerService } from "./WagerService.js";
 import type { WebSocketRelayServer } from "./WebSocketServer.js";
 
+import { databaseService } from "./DatabaseService.js";
+import { Operator } from "@prisma/client";
+
 const logger = createLogger("api");
 
 // ============ OPERATOR KEY STORAGE ============
+// Use databaseService for operator storage.
+// This replaces the previous in-memory registeredOperators Map.
 
-interface RegisteredOperator {
-  operatorKey: string; // The key itself (hashed for comparison)
-  walletAddress: string;
-  createdAt: number;
-}
-
-// In-memory storage (in production, use a database)
-// Maps operator key -> operator info
-const registeredOperators = new Map<string, RegisteredOperator>();
-
-function registerOperatorKey(operatorKey: string, walletAddress: string): boolean {
+async function registerOperatorKey(
+  operatorKey: string,
+  walletAddress: string,
+): Promise<boolean> {
   // Operator key must start with "oper_"
   if (!operatorKey.startsWith("oper_")) {
     return false;
   }
 
   // Check if key already exists
-  if (registeredOperators.has(operatorKey)) {
+  const existing = await databaseService.getOperatorByKey(operatorKey);
+  if (existing) {
     return false;
   }
 
   const normalizedAddress = walletAddress.toLowerCase();
-  const entry: RegisteredOperator = {
+
+  // Persist to database
+  databaseService.upsertOperator({
+    name: `Operator ${normalizedAddress.slice(0, 10)}`,
     operatorKey,
     walletAddress: normalizedAddress,
-    createdAt: Date.now(),
-  };
+  });
 
-  registeredOperators.set(operatorKey, entry);
-  logger.info(`Registered operator key for ${normalizedAddress.slice(0, 10)}...`);
+  logger.info(
+    `Registered operator key for ${normalizedAddress.slice(0, 10)}... (persisted to DB)`,
+  );
   return true;
 }
 
-function validateOperatorKey(operatorKey: string): RegisteredOperator | null {
-  return registeredOperators.get(operatorKey) || null;
+async function validateOperatorKey(operatorKey: string) {
+  return await databaseService.getOperatorByKey(operatorKey);
 }
 
 // Extract Bearer token from Authorization header
@@ -57,28 +59,66 @@ function extractBearerToken(req: Request): string | null {
 
 // Middleware to require operator authentication
 interface AuthenticatedRequest extends Request {
-  operator?: RegisteredOperator;
+  operator?: Operator;
 }
 
-function requireOperatorAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
-  const operatorKey = extractBearerToken(req);
+// Middleware to require Privy authentication
+interface PrivyAuthenticatedRequest extends Request {
+  privyUser?: { userId: string; walletAddress: string };
+}
 
-  if (!operatorKey) {
-    res.status(401).json({ error: "Authorization header required. Use: Authorization: Bearer {operatorKey}" });
+async function requirePrivyAuth(
+  req: PrivyAuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+) {
+  const token = extractBearerToken(req);
+
+  if (!token) {
+    res.status(401).json({
+      error: "Authorization header required with Privy access token",
+    });
     return;
   }
 
-  const operator = validateOperatorKey(operatorKey);
+  const privyUser = await privyWalletService.verifyToken(token);
+  if (!privyUser) {
+    res.status(401).json({ error: "Invalid or expired Privy token" });
+    return;
+  }
+
+  req.privyUser = privyUser;
+  next();
+}
+
+async function requireOperatorAuth(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+) {
+  const operatorKey = extractBearerToken(req);
+
+  if (!operatorKey) {
+    res.status(401).json({
+      error:
+        "Authorization header required. Use: Authorization: Bearer {operatorKey}",
+    });
+    return;
+  }
+
+  const operator = await validateOperatorKey(operatorKey);
   if (!operator) {
     res.status(401).json({ error: "Invalid operator key" });
     return;
   }
 
-  req.operator = operator;
+  req.operator = operator as any;
   next();
 }
 
-export function createApiServer(wsServer: WebSocketRelayServer) {
+export function createApiServer(
+  wsServer: WebSocketRelayServer,
+): express.Express {
   const app = express();
 
   // Middleware
@@ -121,23 +161,26 @@ export function createApiServer(wsServer: WebSocketRelayServer) {
   });
 
   // Get specific room
-  app.get("/api/rooms/:roomId", (req: Request<{ roomId: string }>, res: Response) => {
-    const room = wsServer.getRoom(req.params.roomId);
+  app.get(
+    "/api/rooms/:roomId",
+    (req: Request<{ roomId: string }>, res: Response) => {
+      const room = wsServer.getRoom(req.params.roomId);
 
-    if (!room) {
-      res.status(404).json({ error: "Room not found" });
-      return;
-    }
+      if (!room) {
+        res.status(404).json({ error: "Room not found" });
+        return;
+      }
 
-    res.json({
-      roomId: room.roomId,
-      players: room.players,
-      spectators: room.spectators.length,
-      maxPlayers: room.maxPlayers,
-      phase: room.phase,
-      createdAt: room.createdAt,
-    });
-  });
+      res.json({
+        roomId: room.roomId,
+        players: room.players,
+        spectators: room.spectators.length,
+        maxPlayers: room.maxPlayers,
+        phase: room.phase,
+        createdAt: room.createdAt,
+      });
+    },
+  );
 
   // ============ LEADERBOARD ============
 
@@ -153,32 +196,40 @@ export function createApiServer(wsServer: WebSocketRelayServer) {
   });
 
   // Get specific agent stats
-  app.get("/api/agents/:address/stats", (req: Request<{ address: string }>, res: Response) => {
-    const stats = wsServer.getAgentStats(req.params.address);
+  app.get(
+    "/api/agents/:address/stats",
+    (req: Request<{ address: string }>, res: Response) => {
+      const stats = wsServer.getAgentStats(req.params.address);
 
-    if (!stats) {
-      res.status(404).json({ error: "Agent not found" });
-      return;
-    }
+      if (!stats) {
+        res.status(404).json({ error: "Agent not found" });
+        return;
+      }
 
-    res.json(stats);
-  });
+      res.json(stats);
+    },
+  );
 
   // ============ OPERATOR KEYS ============
 
   // Register an operator key (user provides their own key)
   // The operator key is passed in Authorization header, wallet address in body
-  app.post("/api/operators", (req: Request, res: Response) => {
+  app.post("/api/operators", async (req: Request, res: Response) => {
     const operatorKey = extractBearerToken(req);
     const { walletAddress } = req.body;
 
     if (!operatorKey) {
-      res.status(401).json({ error: "Authorization header required. Use: Authorization: Bearer {your_operator_key}" });
+      res.status(401).json({
+        error:
+          "Authorization header required. Use: Authorization: Bearer {your_operator_key}",
+      });
       return;
     }
 
     if (!operatorKey.startsWith("oper_")) {
-      res.status(400).json({ error: "Invalid operator key format. Must start with 'oper_'" });
+      res.status(400).json({
+        error: "Invalid operator key format. Must start with 'oper_'",
+      });
       return;
     }
 
@@ -192,7 +243,7 @@ export function createApiServer(wsServer: WebSocketRelayServer) {
       return;
     }
 
-    const success = registerOperatorKey(operatorKey, walletAddress);
+    const success = await registerOperatorKey(operatorKey, walletAddress);
 
     if (!success) {
       res.status(409).json({ error: "Operator key already registered" });
@@ -206,71 +257,107 @@ export function createApiServer(wsServer: WebSocketRelayServer) {
     });
   });
 
-  // Validate operator key (check if authenticated)
-  app.get("/api/operators/me", (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    requireOperatorAuth(req, res, () => {
+  // Get active operator key for authenticated user
+  app.get(
+    "/api/operators/active",
+    requirePrivyAuth as any,
+    async (req: PrivyAuthenticatedRequest, res: Response) => {
+      const { walletAddress } = req.privyUser!;
+      const operator = await databaseService.getOperatorByWallet(walletAddress);
+
+      if (!operator) {
+        res
+          .status(404)
+          .json({ error: "No operator key found for this wallet" });
+        return;
+      }
+
       res.json({
-        valid: true,
-        walletAddress: req.operator!.walletAddress,
-        createdAt: req.operator!.createdAt,
+        success: true,
+        operatorKey: operator.operatorKey,
+        walletAddress: operator.walletAddress,
+        createdAt: operator.createdAt,
       });
-    });
-  });
+    },
+  );
+
+  // Validate operator key (check if authenticated)
+  app.get(
+    "/api/operators/me",
+    async (req: AuthenticatedRequest, res: Response) => {
+      await requireOperatorAuth(req, res, () => {
+        res.json({
+          valid: true,
+          walletAddress: req.operator!.walletAddress,
+          createdAt: req.operator!.createdAt,
+        });
+      });
+    },
+  );
 
   // ============ OPERATOR / AGENTS ============
 
   // Create a new agent wallet (requires operator auth)
-  app.post("/api/agents", (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    requireOperatorAuth(req, res, async () => {
-      if (!privyWalletService.isEnabled()) {
-        res.status(503).json({
-          error: "Privy wallet service not configured",
-          message: "Set PRIVY_APP_ID and PRIVY_APP_SECRET in server environment",
-        });
-        return;
-      }
-
-      try {
-        const operatorKey = extractBearerToken(req)!;
-        const result = await privyWalletService.createAgentWallet(operatorKey);
-
-        if (result) {
-          logger.info(`Agent wallet created via API: ${result.address}`);
-          res.status(201).json({
-            success: true,
-            agentAddress: result.address,
-            userId: result.userId,
-            createdAt: Date.now(),
+  app.post(
+    "/api/agents",
+    (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      requireOperatorAuth(req, res, async () => {
+        if (!privyWalletService.isEnabled()) {
+          res.status(503).json({
+            error: "Privy wallet service not configured",
+            message:
+              "Set PRIVY_APP_ID and PRIVY_APP_SECRET in server environment",
           });
-        } else {
-          res.status(500).json({ error: "Failed to create agent wallet" });
+          return;
         }
-      } catch (error) {
-        logger.error("Error creating agent wallet:", error);
-        res.status(500).json({
-          error: "Internal server error",
-          message: error instanceof Error ? error.message : "Unknown error",
-        });
-      }
-    });
-  });
+
+        try {
+          const operatorKey = extractBearerToken(req)!;
+          const result =
+            await privyWalletService.createAgentWallet(operatorKey);
+
+          if (result) {
+            logger.info(`Agent wallet created via API: ${result.address}`);
+            res.status(201).json({
+              success: true,
+              agentAddress: result.address,
+              userId: result.userId,
+              createdAt: Date.now(),
+            });
+          } else {
+            res.status(500).json({ error: "Failed to create agent wallet" });
+          }
+        } catch (error) {
+          logger.error("Error creating agent wallet:", error);
+          res.status(500).json({
+            error: "Internal server error",
+            message: error instanceof Error ? error.message : "Unknown error",
+          });
+        }
+      });
+    },
+  );
 
   // List agents for an operator (requires operator auth)
-  app.get("/api/agents", (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    requireOperatorAuth(req, res, () => {
-      const operatorKey = extractBearerToken(req)!;
-      const agents = privyWalletService.getAgentWalletsForOperator(operatorKey);
+  app.get(
+    "/api/agents",
+    (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      requireOperatorAuth(req, res, async () => {
+        const operatorKey = extractBearerToken(req)!;
+        const agents =
+          await privyWalletService.getAgentWalletsForOperator(operatorKey);
 
-      res.json({
-        agents: agents.map((a) => ({
-          address: a.address,
-          userId: a.userId,
-          createdAt: a.createdAt,
-        })),
-        count: agents.length,
+        res.json({
+          agents: agents.map((a) => ({
+            address: a.address,
+            userId: a.userId,
+            createdAt: a.createdAt,
+          })),
+          count: agents.length,
+        });
       });
-    });
-  });
+    },
+  );
 
   // ============ WAGER ENDPOINTS ============
 
@@ -283,95 +370,145 @@ export function createApiServer(wsServer: WebSocketRelayServer) {
     });
   });
 
-  // Get agent balance
-  app.get("/api/wager/balance/:address", (req: Request<{ address: string }>, res: Response) => {
-    const { address } = req.params;
+  // Get agent wallet balance (native MON)
+  app.get(
+    "/api/agents/:address/balance",
+    async (req: Request<{ address: string }>, res: Response) => {
+      const { address } = req.params;
 
-    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
-      res.status(400).json({ error: "Invalid wallet address format" });
-      return;
-    }
-
-    const balanceInfo = wagerService.getBalanceInfo(address);
-    const balance = wagerService.getBalance(address);
-
-    res.json({
-      address: address.toLowerCase(),
-      balance: balance.toString(),
-      balanceMON: Number(balance) / 1e18,
-      totalDeposited: balanceInfo?.totalDeposited.toString() || "0",
-      totalWon: balanceInfo?.totalWon.toString() || "0",
-      totalLost: balanceInfo?.totalLost.toString() || "0",
-      wagerAmount: wagerService.getWagerAmount().toString(),
-      canAffordWager: wagerService.canAffordWager(address),
-      timestamp: Date.now(),
-    });
-  });
-
-  // Deposit funds (for testing - in production this would be triggered by on-chain events)
-  app.post("/api/wager/deposit", (req: Request, res: Response) => {
-    const { address, amount } = req.body;
-
-    if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
-      res.status(400).json({ error: "Invalid wallet address" });
-      return;
-    }
-
-    if (!amount) {
-      res.status(400).json({ error: "Amount is required" });
-      return;
-    }
-
-    try {
-      const amountBigInt = BigInt(amount);
-      if (amountBigInt <= 0) {
-        res.status(400).json({ error: "Amount must be positive" });
+      if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+        res.status(400).json({ error: "Invalid wallet address format" });
         return;
       }
 
-      wagerService.deposit(address, amountBigInt);
-
-      const newBalance = wagerService.getBalance(address);
+      const balance = await wagerService.getWalletBalance(address);
 
       res.json({
-        success: true,
         address: address.toLowerCase(),
-        deposited: amount,
-        newBalance: newBalance.toString(),
-        newBalanceMON: Number(newBalance) / 1e18,
+        balance: balance.toString(),
+        balanceMON: Number(balance) / 1e18,
         timestamp: Date.now(),
       });
-    } catch (error) {
-      res.status(400).json({ error: "Invalid amount format" });
-    }
-  });
+    },
+  );
+
+  // Get agent wager balance
+  app.get(
+    "/api/wager/balance/:address",
+    async (req: Request<{ address: string }>, res: Response) => {
+      const { address } = req.params;
+
+      if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+        res.status(400).json({ error: "Invalid wallet address format" });
+        return;
+      }
+
+      const balanceInfo = await wagerService.getBalanceInfo(address);
+      const balance = await wagerService.getBalance(address);
+      const canAfford = await wagerService.canAffordWager(address);
+
+      res.json({
+        address: address.toLowerCase(),
+        balance: balance.toString(),
+        balanceMON: Number(balance) / 1e18,
+        totalDeposited: balanceInfo?.totalDeposited.toString() || "0",
+        totalWon: balanceInfo?.totalWon.toString() || "0",
+        totalLost: balanceInfo?.totalLost.toString() || "0",
+        wagerAmount: wagerService.getWagerAmount().toString(),
+        canAffordWager: canAfford,
+        timestamp: Date.now(),
+      });
+    },
+  );
+
+  // Deposit funds (for testing - in production this would be triggered by on-chain events)
+  app.post(
+    "/api/wager/deposit",
+    requireOperatorAuth as any,
+    async (req: AuthenticatedRequest, res: Response) => {
+      const { address, amount } = req.body;
+      const operator = req.operator;
+
+      if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
+        res.status(400).json({ error: "Invalid wallet address" });
+        return;
+      }
+
+      if (!amount) {
+        res.status(400).json({ error: "Amount is required" });
+        return;
+      }
+
+      // Verify operator ownership
+      const isOwner = await privyWalletService.verifyOperatorOwnership(
+        operator!.operatorKey,
+        address,
+      );
+      if (!isOwner) {
+        res.status(401).json({
+          error: "Unauthorized: You do not own this agent wallet",
+        });
+        return;
+      }
+
+      try {
+        const amountBigInt = BigInt(amount);
+        if (amountBigInt <= 0) {
+          res.status(400).json({ error: "Amount must be positive" });
+          return;
+        }
+
+        const success = await wagerService.deposit(address, amountBigInt);
+        if (!success) {
+          res.status(500).json({ error: "Failed to process on-chain deposit" });
+          return;
+        }
+
+        const newBalance = await wagerService.getBalance(address);
+
+        res.json({
+          success: true,
+          address: address.toLowerCase(),
+          deposited: amount,
+          newBalance: newBalance.toString(),
+          newBalanceMON: Number(newBalance) / 1e18,
+          timestamp: Date.now(),
+        });
+      } catch (error) {
+        res.status(400).json({ error: "Invalid amount format" });
+      }
+    },
+  );
 
   // Get game pot info
-  app.get("/api/wager/game/:gameId", (req: Request<{ gameId: string }>, res: Response) => {
-    const { gameId } = req.params;
+  app.get(
+    "/api/wager/game/:gameId",
+    (req: Request<{ gameId: string }>, res: Response) => {
+      const { gameId } = req.params;
 
-    const gameWager = wagerService.getGameWager(gameId);
+      const gameWager = wagerService.getGameWager(gameId);
 
-    if (!gameWager) {
+      if (!gameWager) {
+        res.json({
+          gameId,
+          totalPot: "0",
+          playerCount: 0,
+          settled: false,
+          timestamp: Date.now(),
+        });
+        return;
+      }
+
       res.json({
         gameId,
-        totalPot: "0",
-        playerCount: 0,
-        settled: false,
+        totalPot: gameWager.totalPot.toString(),
+        totalPotMON: Number(gameWager.totalPot) / 1e18,
+        playerCount: gameWager.wagers.size,
+        settled: gameWager.settled,
         timestamp: Date.now(),
       });
-      return;
-    }
-
-    res.json({
-      gameId,
-      totalPot: gameWager.totalPot.toString(),
-      totalPotMON: Number(gameWager.totalPot) / 1e18,
-      playerCount: gameWager.wagers.size,
-      settled: gameWager.settled,
-      timestamp: Date.now(),
-    });
-  });
+    },
+  );
 
   // ============ SERVER INFO ============
 

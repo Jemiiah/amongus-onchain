@@ -33,6 +33,10 @@ model Agent {
   name            String
   operatorId      String
   operator        Operator @relation(fields: [operatorId], references: [id])
+  
+  // Privy details for automated signing
+  privyUserId     String?
+  privyWalletId   String?
 
   // Stats
   gamesPlayed     Int      @default(0)
