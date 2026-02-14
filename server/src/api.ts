@@ -62,6 +62,35 @@ interface AuthenticatedRequest extends Request {
   operator?: Operator;
 }
 
+// Middleware to require Privy authentication
+interface PrivyAuthenticatedRequest extends Request {
+  privyUser?: { userId: string; walletAddress: string };
+}
+
+async function requirePrivyAuth(
+  req: PrivyAuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+) {
+  const token = extractBearerToken(req);
+
+  if (!token) {
+    res.status(401).json({
+      error: "Authorization header required with Privy access token",
+    });
+    return;
+  }
+
+  const privyUser = await privyWalletService.verifyToken(token);
+  if (!privyUser) {
+    res.status(401).json({ error: "Invalid or expired Privy token" });
+    return;
+  }
+
+  req.privyUser = privyUser;
+  next();
+}
+
 async function requireOperatorAuth(
   req: AuthenticatedRequest,
   res: Response,
@@ -227,6 +256,30 @@ export function createApiServer(
       createdAt: Date.now(),
     });
   });
+
+  // Get active operator key for authenticated user
+  app.get(
+    "/api/operators/active",
+    requirePrivyAuth as any,
+    async (req: PrivyAuthenticatedRequest, res: Response) => {
+      const { walletAddress } = req.privyUser!;
+      const operator = await databaseService.getOperatorByWallet(walletAddress);
+
+      if (!operator) {
+        res
+          .status(404)
+          .json({ error: "No operator key found for this wallet" });
+        return;
+      }
+
+      res.json({
+        success: true,
+        operatorKey: operator.operatorKey,
+        walletAddress: operator.walletAddress,
+        createdAt: operator.createdAt,
+      });
+    },
+  );
 
   // Validate operator key (check if authenticated)
   app.get(
