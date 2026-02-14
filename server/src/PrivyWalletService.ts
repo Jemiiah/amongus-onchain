@@ -25,6 +25,7 @@ const PRIVY_WALLET_AUTHORIZATION_KEY = requireEnv(
 const PRIVY_WALLET_AUTHORIZATION_KEY_ID = requireEnv(
   "PRIVY_WALLET_AUTHORIZATION_KEY_ID",
 );
+const PRIVY_VERIFICATION_KEY = requireEnv("PRIVY_VERIFICATION_KEY");
 
 interface AgentWallet {
   userId: string; // Privy user ID
@@ -291,10 +292,9 @@ export class PrivyWalletService {
       const claims = await verifyAccessToken({
         access_token: token,
         app_id: PRIVY_APP_ID,
-        // Using the App Secret as a fallback or a placeholder if a specific key is not provided.
-        // Usually, the verification key is the public key.
-        // If not provided, we might need to fetch it.
-        verification_key: PRIVY_APP_SECRET,
+        // The verification key is the public key provided in the Privy Dashboard.
+        // It must be a valid SPKI formatted string (including headers/footers).
+        verification_key: PRIVY_VERIFICATION_KEY,
       });
 
       if (!claims || !claims.user_id) {
