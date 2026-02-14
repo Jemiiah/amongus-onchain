@@ -67,7 +67,17 @@ export default function Home() {
   } = useGameServer();
 
   // Use WebSocket data when connected for real-time updates, fallback to HTTP
-  const rooms = isConnected && wsRooms.length > 0 ? wsRooms : httpRooms;
+  const rooms: RoomInfo[] | undefined = isConnected && wsRooms.length > 0
+    ? wsRooms.map(r => ({
+        ...r,
+        players: r.players.map(p => ({
+          address: p.address,
+          colorId: p.colorId,
+          isAlive: p.isAlive,
+        })),
+        spectators: r.spectators.length,
+      }))
+    : httpRooms;
   const stats = isConnected && wsStats ? wsStats : httpStats;
   const leaderboard = httpLeaderboard;
   const error = wsError || httpError;
