@@ -245,21 +245,21 @@ export class PrivyWalletService {
         authorization_private_keys: [privateKey],
       };
 
-      // Correct API for server-side signing in @privy-io/node v0.8.0+
-      // Ensure transaction is top-level if required by current SDK structure
       const response = await this.client
         .wallets()
         .ethereum()
         .sendTransaction(wallet.walletId, {
           caip2: `eip155:${chainId}`,
           authorization_context: authorizationContext,
-          transaction: {
-            to,
-            value: value.startsWith("0x")
-              ? value
-              : `0x${BigInt(value).toString(16)}`,
-            data,
-            chain_id: chainId,
+          params: {
+            transaction: {
+              to,
+              value: value.startsWith("0x")
+                ? value
+                : `0x${BigInt(value).toString(16)}`,
+              data,
+              chain_id: chainId,
+            },
           },
         } as any);
 
