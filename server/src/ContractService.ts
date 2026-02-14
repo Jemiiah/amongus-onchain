@@ -55,7 +55,6 @@ interface ContractConfig {
   wagerVaultAddress: string;
   agentRegistryAddress: string;
   gameSettlementAddress: string;
-  monadTokenAddress: string;
   operatorPrivateKey: string;
 }
 
@@ -68,13 +67,11 @@ export class ContractService {
   private wagerVault!: ethers.Contract;
   private agentRegistry!: ethers.Contract;
   private gameSettlement!: ethers.Contract;
-  private monadToken!: ethers.Contract;
   private enabled: boolean = false;
   private networkMode: "testnet" | "mainnet" = "testnet";
 
   // Store addresses for encoding
   private wagerVaultAddress: string = "";
-  private monadTokenAddress: string = "";
 
   constructor() {
     const config = this.getConfig();
@@ -113,14 +110,8 @@ export class ContractService {
         this.operatorWallet,
       );
 
-      this.monadToken = new ethers.Contract(
-        config.monadTokenAddress,
-        ERC20_ABI,
-        this.operatorWallet,
-      );
 
       this.wagerVaultAddress = config.wagerVaultAddress;
-      this.monadTokenAddress = config.monadTokenAddress;
 
       this.enabled = true;
       logger.info("Contract service initialized successfully");
@@ -155,15 +146,14 @@ export class ContractService {
     const wagerVaultAddress = process.env.WAGER_VAULT_ADDRESS;
     const agentRegistryAddress = process.env.AGENT_REGISTRY_ADDRESS;
     const gameSettlementAddress = process.env.GAME_SETTLEMENT_ADDRESS;
-    const monadTokenAddress = process.env.MONAD_TOKEN_ADDRESS;
     const operatorPrivateKey = process.env.OPERATOR_PRIVATE_KEY;
+
 
     if (
       !rpcUrl ||
       !wagerVaultAddress ||
       !agentRegistryAddress ||
       !gameSettlementAddress ||
-      !monadTokenAddress ||
       !operatorPrivateKey
     ) {
       return null;
@@ -175,7 +165,6 @@ export class ContractService {
       wagerVaultAddress,
       agentRegistryAddress,
       gameSettlementAddress,
-      monadTokenAddress,
       operatorPrivateKey,
     };
   }
