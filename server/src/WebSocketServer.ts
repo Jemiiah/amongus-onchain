@@ -29,6 +29,9 @@ const VOTING_DURATION = 30000; // 30 seconds
 const EJECTION_DURATION = 5000; // 5 seconds
 const MAX_ROOMS = 100;
 
+// TEMPORARY: Disable wager system to allow free play
+const WAGERS_DISABLED = process.env.DISABLE_WAGERS === "true";
+
 interface Client {
   id: string;
   ws: WebSocket;
@@ -78,6 +81,9 @@ export class WebSocketRelayServer {
       logger.info(
         `WebSocket server listening on ${this.config.host || "0.0.0.0"}:${this.config.port}`,
       );
+      if (WAGERS_DISABLED) {
+        logger.warn("⚠️  WAGERS DISABLED - Players can join games without depositing funds");
+      }
     });
 
     this.wss.on("connection", (ws, req) => {
@@ -525,14 +531,17 @@ export class WebSocketRelayServer {
       }
 
       // Check if agent has wagered (in-memory first, then on-chain)
-      const hasInMemoryWager = wagerService.hasWagered(
-        roomId,
-        client.address || "",
-      );
-      if (!hasInMemoryWager) {
-        // Check on-chain wager asynchronously
-        this.checkOnChainWagerAndJoin(client, room, roomId, colorId);
-        return;
+      // SKIP WAGER CHECKS IF DISABLED
+      if (!WAGERS_DISABLED) {
+        const hasInMemoryWager = wagerService.hasWagered(
+          roomId,
+          client.address || "",
+        );
+        if (!hasInMemoryWager) {
+          // Check on-chain wager asynchronously
+          this.checkOnChainWagerAndJoin(client, room, roomId, colorId);
+          return;
+        }
       }
 
       const playerState: PlayerState = {
@@ -547,7 +556,7 @@ export class WebSocketRelayServer {
 
       room.players.push(playerState);
       logger.info(
-        `Player ${client.name} joined room ${roomId} (color: ${playerState.colorId}, wagered)`,
+        `Player ${client.name} joined room ${roomId} (color: ${playerState.colorId}${WAGERS_DISABLED ? ", wagers disabled" : ", wagered"})`,
       );
 
       // Broadcast player joined to room
