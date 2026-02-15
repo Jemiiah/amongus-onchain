@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { AnimatePresence } from "framer-motion";
 import {
   MainMenu,
@@ -26,6 +26,8 @@ import {
 } from "@/types/game";
 import { useGameServer, type RoomState } from "@/hooks/useGameServer";
 import { useServerData } from "@/hooks/useServerData";
+import { useGameSounds } from "@/hooks/useGameSounds";
+import { useBackgroundMusic, type MusicPhase } from "@/hooks/useBackgroundMusic";
 import type { RoomInfo, ServerStats } from "@/lib/api";
 
 type GameView = "menu" | "lobby" | "game" | "voting" | "end";
@@ -40,6 +42,18 @@ export default function Home() {
   const [ejectedPlayer, setEjectedPlayer] = useState<Player | null>(null);
   const [gameWon, setGameWon] = useState(true);
   const [spotlightedPlayer, setSpotlightedPlayer] = useState<`0x${string}` | null>(null);
+  const [isSoundMuted, setIsSoundMuted] = useState(false);
+  const [isMusicMuted, setIsMusicMuted] = useState(false);
+
+  // Game sounds
+  const sounds = useGameSounds({ muted: isSoundMuted });
+
+  // Background music
+  const music = useBackgroundMusic({ initialVolume: 0.25, initialMuted: isMusicMuted });
+
+  // Track previous values to detect changes
+  const prevDeadBodiesCount = useRef(0);
+  const prevTasksCompleted = useRef(0);
 
   // HTTP API for menu/lobby data (rooms, stats, leaderboard)
   const {
@@ -88,10 +102,87 @@ export default function Home() {
   useEffect(() => {
     if (phase === GamePhase.ActionCommit && view === "lobby") {
       setView("game");
+      sounds.playGameStart();
     } else if (phase === GamePhase.Ended && view === "game") {
       setShowGameEnd(true);
     }
-  }, [phase, view]);
+  }, [phase, view, sounds]);
+
+  // Play sounds on game events
+  useEffect(() => {
+    // Kill sound when new dead body appears
+    if (deadBodies.length > prevDeadBodiesCount.current && prevDeadBodiesCount.current > 0) {
+      sounds.playKill();
+    }
+    prevDeadBodiesCount.current = deadBodies.length;
+  }, [deadBodies.length, sounds]);
+
+  useEffect(() => {
+    // Task complete sound
+    if (tasksCompleted > prevTasksCompleted.current && prevTasksCompleted.current > 0) {
+      sounds.playTaskComplete();
+    }
+    prevTasksCompleted.current = tasksCompleted;
+  }, [tasksCompleted, sounds]);
+
+  // Play sound when body reported screen shows
+  useEffect(() => {
+    if (showBodyReported) {
+      sounds.playBodyReported();
+    }
+  }, [showBodyReported, sounds]);
+
+  // Play sound when ejection screen shows
+  useEffect(() => {
+    if (showEjection) {
+      sounds.playEjection();
+    }
+  }, [showEjection, sounds]);
+
+  // Play sound when game end screen shows
+  useEffect(() => {
+    if (showGameEnd) {
+      if (gameWon) {
+        sounds.playVictory();
+      } else {
+        sounds.playDefeat();
+      }
+    }
+  }, [showGameEnd, gameWon, sounds]);
+
+  // Play sound when voting starts
+  useEffect(() => {
+    if (view === "voting") {
+      sounds.playVoteStart();
+    }
+  }, [view, sounds]);
+
+  // Switch background music based on game view
+  useEffect(() => {
+    const viewToMusic: Record<GameView, MusicPhase> = {
+      menu: "menu",
+      lobby: "lobby",
+      game: "gameplay",
+      voting: "voting",
+      end: "menu",
+    };
+
+    const targetTrack = viewToMusic[view];
+
+    // Handle game end music separately (victory/defeat)
+    if (showGameEnd) {
+      music.fadeToTrack(gameWon ? "victory" : "defeat", 500);
+    } else if (music.currentTrack !== targetTrack) {
+      music.fadeToTrack(targetTrack, 1000);
+    }
+  }, [view, showGameEnd, gameWon, music]);
+
+  // Sync music mute state
+  useEffect(() => {
+    if (isMusicMuted !== music.isMuted) {
+      music.toggleMute();
+    }
+  }, [isMusicMuted, music]);
 
   // Timer countdown for voting
   useEffect(() => {
@@ -122,6 +213,7 @@ export default function Home() {
 
   const handleVote = (target: `0x${string}` | null) => {
     setHasVoted(true);
+    sounds.playVoteCast();
     // Voting is handled by the server via WebSocket
   };
 
@@ -193,8 +285,43 @@ export default function Home() {
               <TaskBar completed={tasksCompleted} total={totalTasks} />
             </div>
 
-            {/* Connection badge */}
-            <div className="fixed top-4 right-4 z-50">
+            {/* Connection badge and audio controls */}
+            <div className="fixed top-4 right-4 z-50 flex items-center gap-2">
+              {/* Music toggle */}
+              <button
+                onClick={() => setIsMusicMuted(!isMusicMuted)}
+                className="flex items-center gap-2 bg-slate-800/80 backdrop-blur-sm rounded-lg px-3 py-2 border border-slate-600/50 hover:bg-slate-700/80 transition-colors"
+                title={isMusicMuted ? "Unmute music" : "Mute music"}
+              >
+                {isMusicMuted ? (
+                  <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3l18 18" />
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                  </svg>
+                )}
+              </button>
+              {/* Sound effects toggle */}
+              <button
+                onClick={() => setIsSoundMuted(!isSoundMuted)}
+                className="flex items-center gap-2 bg-slate-800/80 backdrop-blur-sm rounded-lg px-3 py-2 border border-slate-600/50 hover:bg-slate-700/80 transition-colors"
+                title={isSoundMuted ? "Unmute sound effects" : "Mute sound effects"}
+              >
+                {isSoundMuted ? (
+                  <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                  </svg>
+                )}
+              </button>
+              {/* Connection badge */}
               <div className="flex items-center gap-2 bg-purple-900/80 backdrop-blur-sm rounded-lg px-4 py-2 border border-purple-500/50">
                 <div className={`w-2 h-2 rounded-full animate-pulse ${isConnected ? "bg-green-500" : "bg-red-500"}`} />
                 <span className="text-purple-200 text-sm font-medium">
