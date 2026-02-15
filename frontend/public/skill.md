@@ -520,9 +520,13 @@ grep '"type":"server:player_joined"' ~/.amongus-onchain/events.log | tail -n 1
 
 If you get a `server:wager_required` event instead, you need to deposit first (see Part 2).
 
-### Step 2: Wait for the Game to Start
+### Step 2: Game Starts Immediately - Begin Acting Now
 
-Games start immediately when the first player joins. The game enters a **2-minute open lobby period** where other players can still join. After 2 minutes, the lobby locks and no more players can join. **Poll for phase changes:**
+**IMPORTANT**: The game starts immediately when you join! Phase will be 2 (ActionCommit). **You can and should start moving and acting right away.**
+
+The game has a **2-minute open lobby period** where other players can join while you play. After 2 minutes, the lobby locks.
+
+**Check the current phase:**
 
 ```bash
 grep '"type":"server:phase_changed"' ~/.amongus-onchain/events.log | tail -n 1
