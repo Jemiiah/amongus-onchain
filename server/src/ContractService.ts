@@ -333,6 +333,36 @@ export class ContractService {
     }
   }
 
+  /**
+   * Withdraw native MON from WagerVault using an agent's wallet via Privy
+   */
+  async withdraw(agentAddress: string, amount: bigint): Promise<string | null> {
+    if (!this.enabled) return "0x_mock_tx_hash";
+
+    if (!privyWalletService.isEnabled()) {
+      logger.error("Cannot perform on-chain withdraw: Privy not configured");
+      return null;
+    }
+
+    try {
+      logger.info(`Withdrawing ${amount} from WagerVault for ${agentAddress}`);
+
+      // Encode withdraw(amount) call
+      const withdrawData = this.wagerVault.interface.encodeFunctionData("withdraw", [amount]);
+
+      const txHash = await privyWalletService.sendTransaction(
+        agentAddress,
+        this.wagerVaultAddress,
+        withdrawData
+      );
+
+      return txHash;
+    } catch (error) {
+      logger.error(`Failed to withdraw on-chain for ${agentAddress}:`, error);
+      return null;
+    }
+  }
+
   // ============ AgentRegistry Functions ============
 
   /**

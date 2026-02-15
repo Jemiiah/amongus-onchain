@@ -76,6 +76,41 @@ export class WagerService {
   }
 
   /**
+   * Withdraw funds from an agent's balance
+   * This performs an on-chain withdrawal from WagerVault to the agent's wallet
+   */
+  async withdraw(address: string, amount: bigint | "max"): Promise<{ success: boolean; txHash?: string; amount?: bigint; error?: string }> {
+    const balance = await this.getBalance(address);
+
+    if (balance <= BigInt(0)) {
+      return { success: false, error: "No balance to withdraw" };
+    }
+
+    // Calculate actual withdraw amount
+    const withdrawAmount = amount === "max" ? balance : amount;
+
+    if (withdrawAmount > balance) {
+      return { success: false, error: `Insufficient balance. Have ${this.formatMON(balance)} MON, requested ${this.formatMON(withdrawAmount)} MON` };
+    }
+
+    // Perform on-chain withdrawal
+    const txHash = await contractService.withdraw(address, withdrawAmount);
+
+    if (!txHash) {
+      return { success: false, error: "On-chain withdrawal failed" };
+    }
+
+    // Update database balance tracking
+    databaseService.updateAgentBalance(address, -withdrawAmount, "withdraw");
+
+    logger.info(
+      `Withdraw: ${address.slice(0, 10)}... withdrew ${this.formatMON(withdrawAmount)} MON (TX: ${txHash})`,
+    );
+
+    return { success: true, txHash, amount: withdrawAmount };
+  }
+
+  /**
    * Get agent's current balance from on-chain (wager balance)
    * This is the source of truth for balances
    */

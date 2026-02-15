@@ -548,6 +548,71 @@ export function createApiServer(
     },
   );
 
+  // Withdraw funds from agent's vault balance
+  app.post(
+    "/api/wager/withdraw",
+    requireOperatorAuth as any,
+    async (req: AuthenticatedRequest, res: Response) => {
+      const { agentAddress, amount } = req.body;
+      const operator = req.operator;
+
+      if (!agentAddress || !/^0x[a-fA-F0-9]{40}$/.test(agentAddress)) {
+        res.status(400).json({ error: "Invalid agent address" });
+        return;
+      }
+
+      // Verify operator ownership
+      const isOwner = await privyWalletService.verifyOperatorOwnership(
+        operator!.operatorKey,
+        agentAddress,
+      );
+      if (!isOwner) {
+        res.status(401).json({
+          error: "Unauthorized: You do not own this agent wallet",
+        });
+        return;
+      }
+
+      try {
+        // Parse amount - can be "max" or a wei string
+        let withdrawAmount: bigint | "max";
+        if (amount === "max") {
+          withdrawAmount = "max";
+        } else if (amount) {
+          withdrawAmount = BigInt(amount);
+          if (withdrawAmount <= 0) {
+            res.status(400).json({ error: "Amount must be positive" });
+            return;
+          }
+        } else {
+          withdrawAmount = "max"; // Default to max
+        }
+
+        const result = await wagerService.withdraw(agentAddress, withdrawAmount);
+
+        if (!result.success) {
+          res.status(400).json({ success: false, error: result.error });
+          return;
+        }
+
+        const newBalance = await wagerService.getBalance(agentAddress);
+
+        res.json({
+          success: true,
+          txHash: result.txHash,
+          amount: result.amount?.toString(),
+          amountMON: result.amount ? Number(result.amount) / 1e18 : 0,
+          newBalance: newBalance.toString(),
+          newBalanceMON: Number(newBalance) / 1e18,
+          timestamp: Date.now(),
+        });
+      } catch (error) {
+        logger.error("Withdraw error:", error);
+        res.status(400).json({ error: "Invalid amount format" });
+      }
+    },
+  );
+
   // Get game pot info
   app.get(
     "/api/wager/game/:gameId",
