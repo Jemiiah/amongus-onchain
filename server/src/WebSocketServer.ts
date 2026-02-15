@@ -564,7 +564,7 @@ export class WebSocketRelayServer {
         location: 0, // Cafeteria
         isAlive: true,
         tasksCompleted: 0,
-        totalTasks: 5,
+        totalTasks: 10, // Increased from 5 for longer games
         hasVoted: false,
       };
 
@@ -633,7 +633,7 @@ export class WebSocketRelayServer {
           location: 0, // Cafeteria
           isAlive: true,
           tasksCompleted: 0,
-          totalTasks: 5,
+          totalTasks: 10, // Increased from 5 for longer games
           hasVoted: false,
         };
 
@@ -951,7 +951,7 @@ export class WebSocketRelayServer {
     // Assign tasks to players (locations 1-8, excluding cafeteria which is 0)
     for (const player of room.players) {
       if (!extended.impostors.has(player.address.toLowerCase())) {
-        const taskLocations = this.generateTaskLocations(5);
+        const taskLocations = this.generateTaskLocations(10);
         this.gameStateManager.assignTasks(
           roomId,
           player.address,
@@ -1030,9 +1030,10 @@ export class WebSocketRelayServer {
   private generateTaskLocations(count: number): number[] {
     const locations: number[] = [];
     const available = [1, 2, 3, 4, 5, 6, 7, 8]; // All rooms except Cafeteria
-    for (let i = 0; i < count && available.length > 0; i++) {
+    for (let i = 0; i < count; i++) {
+      // Allow repeat locations for counts > 8
       const idx = Math.floor(Math.random() * available.length);
-      locations.push(available.splice(idx, 1)[0]);
+      locations.push(available[idx]);
     }
     return locations;
   }
