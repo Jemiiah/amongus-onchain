@@ -341,6 +341,7 @@ export interface RoomState {
 export type ServerMessage =
   | ServerWelcomeMessage
   | ServerErrorMessage
+  | ServerLobbyLockedMessage
   | ServerRoomCreatedMessage
   | ServerRoomListMessage
   | ServerRoomUpdateMessage
@@ -386,6 +387,12 @@ export interface ServerWelcomeMessage {
 export interface ServerErrorMessage {
   type: "server:error";
   code: string;
+  message: string;
+}
+
+export interface ServerLobbyLockedMessage {
+  type: "server:lobby_locked";
+  gameId: string;
   message: string;
 }
 

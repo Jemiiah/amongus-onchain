@@ -23,7 +23,8 @@ const logger = createLogger("websocket-server");
 
 // Room management constants
 const MAX_PLAYERS_PER_ROOM = 10;
-const MIN_PLAYERS_TO_START = 2;
+const MIN_PLAYERS_TO_START = 1; // Changed from 2 to 1 for solo testing
+const LOBBY_WAITING_DURATION = 120000; // 2 minutes to wait for other agents
 const DISCUSSION_DURATION = 30000; // 30 seconds
 const VOTING_DURATION = 30000; // 30 seconds
 const EJECTION_DURATION = 5000; // 5 seconds
@@ -55,6 +56,8 @@ interface ExtendedRoomState extends RoomState {
   currentRound: number;
   currentPhase: GamePhase;
   phaseTimer: NodeJS.Timeout | null;
+  lobbyLocked: boolean; // True after lobby waiting period expires
+  lobbyTimer: NodeJS.Timeout | null; // Timer for lobby waiting period
 }
 
 export class WebSocketRelayServer {
@@ -501,6 +504,17 @@ export class WebSocketRelayServer {
       return;
     }
 
+    // Check if lobby is locked (after waiting period expired)
+    const extended = this.extendedState.get(roomId);
+    if (extended?.lobbyLocked && !asSpectator && client.isAgent) {
+      this.sendError(
+        client,
+        "LOBBY_LOCKED",
+        "Game has started and lobby is now locked. You can join as a spectator.",
+      );
+      return;
+    }
+
     // Leave previous room if any
     if (client.roomId && client.roomId !== roomId) {
       this.handleLeaveRoom(client, client.roomId);
@@ -763,6 +777,8 @@ export class WebSocketRelayServer {
       currentRound: 0,
       currentPhase: room.phase as any, // Lobby
       phaseTimer: null,
+      lobbyLocked: false, // Lobby open for joins
+      lobbyTimer: null, // Will be set when first player joins
     };
 
     this.rooms.set(roomId, room);
@@ -834,37 +850,43 @@ export class WebSocketRelayServer {
 
   private onPlayerJoinedRoom(roomId: string): void {
     const room = this.rooms.get(roomId);
-    if (!room || room.phase !== "lobby") return;
+    const extended = this.extendedState.get(roomId);
+    if (!room || !extended) return;
 
-    // Auto-start if reached max players
-    if (room.players.length >= room.maxPlayers) {
+    // If first player joins (and we're in lobby), start game immediately and begin lobby timer
+    if (room.players.length === 1 && room.phase === "lobby") {
       logger.info(
-        `Room ${roomId} is full (${room.players.length} players), starting game automatically`,
+        `First player joined room ${roomId}, starting game and opening lobby for ${LOBBY_WAITING_DURATION / 1000}s`,
       );
-      this.startGameInternal(roomId);
-    } else if (room.players.length >= MIN_PLAYERS_TO_START) {
-      // User requested: once 2 agents are in, start (maybe after a small delay)
-      // Check if there are at least 2 agents
-      const agentCount = room.players.filter((p) => {
-        const client = this.findClientByAddress(p.address);
-        return client?.isAgent;
-      }).length;
 
-      if (agentCount >= 2) {
-        logger.info(
-          `Room ${roomId} has ${agentCount} agents, starting game in 5 seconds...`,
-        );
-        setTimeout(() => {
-          const currentRoom = this.rooms.get(roomId);
-          if (
-            currentRoom &&
-            currentRoom.phase === "lobby" &&
-            currentRoom.players.length >= MIN_PLAYERS_TO_START
-          ) {
-            this.startGameInternal(roomId);
-          }
-        }, 5000);
+      // Start the game immediately so player can interact
+      this.startGameInternal(roomId);
+
+      // Start lobby waiting timer (2 minutes)
+      extended.lobbyTimer = setTimeout(() => {
+        extended.lobbyLocked = true;
+        logger.info(`Room ${roomId} lobby locked after waiting period`);
+        this.broadcastToRoom(roomId, {
+          type: "server:lobby_locked",
+          gameId: roomId,
+          message: "Lobby is now locked. No more players can join.",
+        });
+      }, LOBBY_WAITING_DURATION);
+
+      return;
+    }
+
+    // Auto-start if reached max players (during lobby waiting period)
+    if (room.players.length >= room.maxPlayers && !extended.lobbyLocked) {
+      logger.info(
+        `Room ${roomId} is full (${room.players.length} players), locking lobby early`,
+      );
+      // Lock lobby early if full
+      if (extended.lobbyTimer) {
+        clearTimeout(extended.lobbyTimer);
+        extended.lobbyTimer = null;
       }
+      extended.lobbyLocked = true;
     }
   }
 
@@ -896,7 +918,8 @@ export class WebSocketRelayServer {
       impostorAddresses.push(room.players[idx].address);
     }
 
-    // Initialize extended room state
+    // Initialize or update extended room state
+    const existingExtended = this.extendedState.get(roomId);
     const extended: ExtendedRoomState = {
       ...room,
       impostors: new Set(impostorAddresses.map((a) => a.toLowerCase())),
@@ -905,6 +928,8 @@ export class WebSocketRelayServer {
       currentRound: 1,
       currentPhase: 2, // ActionCommit
       phaseTimer: null,
+      lobbyLocked: existingExtended?.lobbyLocked ?? false,
+      lobbyTimer: existingExtended?.lobbyTimer ?? null,
     };
     this.extendedState.set(roomId, extended);
 
@@ -2602,6 +2627,9 @@ export class WebSocketRelayServer {
     const extended = this.extendedState.get(roomId);
     if (extended?.phaseTimer) {
       clearTimeout(extended.phaseTimer);
+    }
+    if (extended?.lobbyTimer) {
+      clearTimeout(extended.lobbyTimer);
     }
 
     // Cancel game on-chain if it was playing
