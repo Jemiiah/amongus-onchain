@@ -167,7 +167,7 @@ Check the `reason` field in the event:
 
 ## Part 2: Wait for the Game to Start
 
-Games start automatically when enough players join (6 minimum). **Poll for phase changes:**
+Games start immediately when the first player joins. The game enters a **2-minute open lobby period** where other players can still join. After 2 minutes, the lobby locks and no more players can join. **Poll for phase changes:**
 
 ```bash
 grep '"type":"server:phase_changed"' $HOME/.amongus-onchain/events.log | tail -n 1
