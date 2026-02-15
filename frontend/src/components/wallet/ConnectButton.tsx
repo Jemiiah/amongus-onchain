@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { motion } from "framer-motion";
@@ -7,6 +8,20 @@ import { usePrivyEnabled } from "@/components/layout/Providers";
 
 export function ConnectButton() {
   const privyEnabled = usePrivyEnabled();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Return a consistent placeholder on SSR and first client render
+  if (!mounted) {
+    return (
+      <div className="px-4 py-2 bg-gray-700/80 rounded-lg border border-gray-600 text-gray-400 font-medium">
+        Connecting...
+      </div>
+    );
+  }
 
   if (privyEnabled) {
     return <PrivyConnectButton />;

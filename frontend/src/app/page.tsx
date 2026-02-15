@@ -18,6 +18,7 @@ import {
 } from "@/components/game";
 import { ConnectButton } from "@/components/wallet/ConnectButton";
 import { OperatorKeyPanel } from "@/components/operator/OperatorKeyPanel";
+import { UserDashboard } from "@/components/operator/UserDashboard";
 import {
   Player,
   GamePhase,
@@ -32,7 +33,7 @@ import { useGameServer, type RoomState } from "@/hooks/useGameServer";
 import { useServerData } from "@/hooks/useServerData";
 import { api, type RoomInfo, type ServerStats } from "@/lib/api";
 
-type GameView = "menu" | "lobby" | "game" | "voting" | "end";
+type GameView = "menu" | "lobby" | "game" | "voting" | "end" | "dashboard";
 
 export default function Home() {
   const privyEnabled = usePrivyEnabled();
@@ -208,6 +209,13 @@ function HomeInner({
     }
   }, [showEjection]);
 
+  // Close create room modal when room is effectively created (currentRoom set)
+  useEffect(() => {
+    if (currentRoom) {
+      setShowCreateRoomModal(false);
+    }
+  }, [currentRoom]);
+
   const handleBack = () => {
     if (currentRoom) {
       leaveRoom();
@@ -222,6 +230,7 @@ function HomeInner({
           <MainMenu
             key="menu"
             onPlay={handlePlay}
+            onOpenDashboard={() => setView("dashboard")}
             isConnected={isConnected}
             error={error}
             rooms={rooms}
@@ -245,6 +254,19 @@ function HomeInner({
             onCreateRoom={() => setShowCreateRoomModal(true)}
             onLogin={login}
             currentAddress={userAddress}
+          />
+        )}
+
+        {view === "dashboard" && (
+          <UserDashboard
+            key="dashboard"
+            onClose={() => setView("menu")}
+            onJoinGame={(roomId) => {
+              setView("lobby");
+              // Logic to join specific room would go here
+              setView("menu"); 
+            }}
+            allRooms={httpRooms}
           />
         )}
 
@@ -432,6 +454,7 @@ function HomeInner({
       {showCreateRoomModal && (
         <CreateRoomModal
           onClose={() => setShowCreateRoomModal(false)}
+          error={error}
           onCreate={async (max, imp, wager) => {
             console.log("Creating room with params:", { max, imp, wager });
             
@@ -904,9 +927,11 @@ function LobbyView({
 function CreateRoomModal({
   onClose,
   onCreate,
+  error,
 }: {
   onClose: () => void;
   onCreate: (max: number, imp: number, wager: string) => void;
+  error?: string | null;
 }) {
   const [maxPlayers, setMaxPlayers] = useState(10);
   const [impostorCount, setImpostorCount] = useState(2);
@@ -933,18 +958,31 @@ function CreateRoomModal({
     visible: { opacity: 1, y: 0 }
   };
 
-  const handleCreate = () => {
+  const [isDeploying, setIsDeploying] = useState(false);
+
+  // Stop deploying if error occurs
+  useEffect(() => {
+    if (error) {
+      setIsDeploying(false);
+    }
+  }, [error]);
+
+  const handleCreate = async () => {
     try {
+      setIsDeploying(true);
       // Safe conversion for BigInt
       const wagerNum = parseFloat(wager);
       if (isNaN(wagerNum) || wagerNum <= 0) {
         console.error("Invalid wager amount");
+        setIsDeploying(false);
         return;
       }
       const weiValue = BigInt(Math.floor(wagerNum * 1e18)).toString();
-      onCreate(maxPlayers, impostorCount, weiValue);
+      await onCreate(maxPlayers, impostorCount, weiValue);
+      // setIsDeploying(false); // Removed to keep spinner until modal closes
     } catch (err) {
       console.error("Wager conversion error:", err);
+      setIsDeploying(false);
     }
   };
 
@@ -1027,6 +1065,17 @@ function CreateRoomModal({
               </div>
             </motion.div>
 
+            {/* Error Message */}
+            {error && (
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-4 bg-red-500/10 border border-red-500/30 rounded-2xl text-red-400 text-xs font-bold text-center uppercase tracking-wider"
+              >
+                {error}
+              </motion.div>
+            )}
+
             {/* Wager - Mechanical Input */}
             <motion.div variants={itemVariants}>
               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-4">Mission Deposit (Wager)</label>
@@ -1061,13 +1110,24 @@ function CreateRoomModal({
               whileHover={{ scale: 1.02, y: -2 }}
               whileTap={{ scale: 0.98 }}
               onClick={handleCreate}
-              className="w-full py-6 rounded-3xl bg-white text-slate-900 font-black text-lg uppercase tracking-widest shadow-[0_20px_40px_-15px_rgba(255,255,255,0.2)] hover:shadow-[0_25px_50px_-12px_rgba(255,255,255,0.3)] transition-all flex items-center justify-center gap-3 relative overflow-hidden group"
+              disabled={isDeploying}
+              className={`w-full py-6 rounded-3xl bg-white text-slate-900 font-black text-lg uppercase tracking-widest shadow-[0_20px_40px_-15px_rgba(255,255,255,0.2)] hover:shadow-[0_25px_50px_-12px_rgba(255,255,255,0.3)] transition-all flex items-center justify-center gap-3 relative overflow-hidden group ${isDeploying ? "opacity-80 cursor-wait" : ""}`}
             >
               <div className="absolute inset-0 bg-gradient-to-r from-cyan-400 to-blue-500 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-              <span className="relative z-10 group-hover:text-white transition-colors">Start Deployment</span>
-              <svg className="w-6 h-6 relative z-10 transition-transform group-hover:translate-x-1 group-hover:text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-              </svg>
+              
+              {isDeploying ? (
+                <>
+                  <div className="w-6 h-6 border-4 border-slate-300 border-t-cyan-500 rounded-full animate-spin relative z-10" />
+                  <span className="relative z-10 text-slate-500 group-hover:text-white transition-colors">INITIALIZING...</span>
+                </>
+              ) : (
+                <>
+                  <span className="relative z-10 group-hover:text-white transition-colors">Start Deployment</span>
+                  <svg className="w-6 h-6 relative z-10 transition-transform group-hover:translate-x-1 group-hover:text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                  </svg>
+                </>
+              )}
             </motion.button>
           </div>
         </div>
