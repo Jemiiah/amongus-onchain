@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
+import { usePrivy } from "@privy-io/react-auth";
+import { usePrivyEnabled } from "@/components/layout/Providers";
 import {
   MainMenu,
   SpaceBackground,
@@ -14,6 +16,8 @@ import {
   AmongUsSprite,
   GameLogPanel,
 } from "@/components/game";
+import { ConnectButton } from "@/components/wallet/ConnectButton";
+import { OperatorKeyPanel } from "@/components/operator/OperatorKeyPanel";
 import {
   Player,
   GamePhase,
@@ -26,11 +30,46 @@ import {
 } from "@/types/game";
 import { useGameServer, type RoomState } from "@/hooks/useGameServer";
 import { useServerData } from "@/hooks/useServerData";
-import type { RoomInfo, ServerStats } from "@/lib/api";
+import { api, type RoomInfo, type ServerStats } from "@/lib/api";
 
 type GameView = "menu" | "lobby" | "game" | "voting" | "end";
 
 export default function Home() {
+  const privyEnabled = usePrivyEnabled();
+  
+  if (privyEnabled) {
+    return <HomeWithAuth />;
+  }
+
+  return (
+    <HomeInner 
+      authenticated={true} 
+      ready={true} 
+      login={() => {}} 
+      getAccessToken={async () => ""}
+      userAddress={undefined}
+    />
+  );
+}
+
+function HomeWithAuth() {
+  const auth = usePrivy();
+  return <HomeInner {...auth} userAddress={auth.user?.wallet?.address} />;
+}
+
+function HomeInner({ 
+  authenticated, 
+  ready, 
+  login, 
+  getAccessToken,
+  userAddress
+}: { 
+  authenticated: boolean; 
+  ready: boolean; 
+  login: () => void; 
+  getAccessToken: () => Promise<string | null>;
+  userAddress?: string;
+}) {
   const [view, setView] = useState<GameView>("menu");
   const [showBodyReported, setShowBodyReported] = useState(false);
   const [showEjection, setShowEjection] = useState(false);
@@ -40,6 +79,7 @@ export default function Home() {
   const [ejectedPlayer, setEjectedPlayer] = useState<Player | null>(null);
   const [gameWon, setGameWon] = useState(true);
   const [spotlightedPlayer, setSpotlightedPlayer] = useState<`0x${string}` | null>(null);
+  const [showCreateRoomModal, setShowCreateRoomModal] = useState(false);
 
   // HTTP API for menu/lobby data (rooms, stats, leaderboard)
   const {
@@ -48,6 +88,21 @@ export default function Home() {
     leaderboard: httpLeaderboard,
     error: httpError,
   } = useServerData(5000); // Refresh every 5 seconds
+
+  // Authentication state
+  const clientPrivyEnabled = usePrivyEnabled();
+  const [serverPrivyEnabled, setServerPrivyEnabled] = useState(true);
+  const isAuthenticated = clientPrivyEnabled ? ready && authenticated : true;
+
+  // Sync with server privy status
+  useEffect(() => {
+    api.getServerInfo().then(info => {
+      setServerPrivyEnabled(info.privy.enabled);
+    }).catch(err => {
+      console.warn("Failed to fetch server info, defaulting to client privy state:", err);
+      setServerPrivyEnabled(clientPrivyEnabled);
+    });
+  }, [clientPrivyEnabled]);
 
   // WebSocket for real-time gameplay
   const {
@@ -64,6 +119,7 @@ export default function Home() {
     totalTasks,
     joinRoom,
     leaveRoom,
+    createRoom,
   } = useGameServer();
 
   // Use WebSocket data when connected for real-time updates, fallback to HTTP
@@ -178,13 +234,17 @@ export default function Home() {
           <LobbyView
             key="lobby"
             isConnected={isConnected}
+            isAuthenticated={isAuthenticated}
             rooms={rooms}
             currentRoom={currentRoom}
             players={players}
             logs={logs}
             stats={stats}
             onJoinRoom={handleJoinRoom}
-            onBack={handleBack}
+            onBack={() => setView("menu")}
+            onCreateRoom={() => setShowCreateRoomModal(true)}
+            onLogin={login}
+            currentAddress={userAddress}
           />
         )}
 
@@ -201,18 +261,53 @@ export default function Home() {
             />
 
             {/* Task bar - overlay at top */}
-            <div className="fixed top-0 left-0 right-0 z-40 p-4">
-              <TaskBar completed={tasksCompleted} total={totalTasks} />
+            <div className="fixed top-0 left-0 right-0 z-40 p-4 pointer-events-none">
+              <div className="grid grid-cols-3 items-start w-full">
+                {/* Top Left - Wallet & Operator Key */}
+                <div className="flex flex-col gap-2 pointer-events-auto">
+                  <ConnectButton />
+                  <OperatorKeyPanel />
+                </div>
+                
+                {/* Centered TaskBar */}
+                <div className="flex justify-center pointer-events-auto">
+                  <TaskBar completed={tasksCompleted} total={totalTasks} />
+                </div>
+                
+                {/* Space for top-right controls */}
+                <div className="pointer-events-none" />
+              </div>
             </div>
 
-            {/* Connection badge */}
-            <div className="fixed top-4 right-4 z-50">
-              <div className="flex items-center gap-2 bg-purple-900/80 backdrop-blur-sm rounded-lg px-4 py-2 border border-purple-500/50">
+            {/* Top Right Controls */}
+            <div className="fixed top-4 right-4 z-50 flex flex-col items-end gap-3">
+              {/* Connection badge */}
+              <div className="flex items-center gap-2 bg-slate-900/80 backdrop-blur-sm rounded-lg px-4 py-2 border border-slate-700/50">
                 <div className={`w-2 h-2 rounded-full animate-pulse ${isConnected ? "bg-green-500" : "bg-red-500"}`} />
-                <span className="text-purple-200 text-sm font-medium">
-                  {isConnected ? "Live (WebSocket)" : "Disconnected"}
+                <span className="text-slate-200 text-xs font-medium">
+                  {isConnected ? "Live" : "Disconnected"}
                 </span>
               </div>
+
+              {/* Invite Agent Button */}
+              {currentRoom && (
+                <div className="flex flex-col items-end gap-2">
+                  <a
+                    href={`/play.md?gameId=${currentRoom.roomId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-5 rounded-xl shadow-lg border border-emerald-400/30 flex items-center gap-2 transition-all transform hover:scale-105"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    <span>INVITE AGENT</span>
+                  </a>
+                  <div className="bg-black/60 backdrop-blur-md border border-emerald-500/20 rounded-lg p-2 text-[10px] text-emerald-300 text-right max-w-[180px]">
+                    Share this link with your AI agent to join room <span className="text-white font-mono">{currentRoom.roomId}</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Right sidebar - overlay */}
@@ -333,6 +428,72 @@ export default function Home() {
           setView("menu");
         }}
       />
+
+      {showCreateRoomModal && (
+        <CreateRoomModal
+          onClose={() => setShowCreateRoomModal(false)}
+          onCreate={async (max, imp, wager) => {
+            console.log("Creating room with params:", { max, imp, wager });
+            
+            if (clientPrivyEnabled && (!ready || !authenticated)) {
+              console.warn("Auth not ready or not authenticated. Triggering login...");
+              login();
+              return;
+            }
+
+            try {
+              // Only attempt to get a real token if both client and server have Privy enabled
+              const shouldGetToken = clientPrivyEnabled && serverPrivyEnabled;
+              let token: string | null = "bypass";
+              
+              if (shouldGetToken) {
+                try {
+                  // Explicitly wait for token
+                  token = await getAccessToken();
+                  if (!token) {
+                    console.warn("getAccessToken returned null/undefined, falling back to bypass");
+                    token = "bypass";
+                  }
+                } catch (tErr) {
+                  console.error("Error getting Privy token:", tErr);
+                  token = "bypass";
+                }
+              }
+
+              console.log("Final dispatch token status:", { 
+                shouldGetToken, 
+                tokenType: token === "bypass" ? "Bypass" : "Real Token",
+                hasToken: !!token && token !== "bypass"
+              });
+
+              if (!token) {
+                console.error("No valid token (real or bypass) found.");
+                return;
+              }
+
+              const result = await api.createRoom(token, {
+                maxPlayers: max,
+                impostorCount: imp,
+                wagerAmount: wager,
+              });
+              
+              console.log("Room creation result:", result);
+              
+              if (result.success) {
+                setShowCreateRoomModal(false);
+              } else {
+                console.error("Room creation failed. Full response:", result);
+                // Alert the user if the token was rejected
+                if (result.error?.toLowerCase().includes("privy token")) {
+                  alert(`Session validation failed: ${result.error}${result.details ? ` (${result.details})` : ""}. Please refresh and try again.`);
+                }
+              }
+            } catch (err) {
+              console.error("Error in onCreate workflow:", err);
+            }
+          }}
+        />
+      )}
     </>
   );
 }
@@ -344,9 +505,13 @@ interface LobbyViewProps {
   currentRoom: RoomState | null;
   players: Player[];
   logs: GameLog[];
-  stats: ServerStats | null;
+  stats?: ServerStats | null;
   onJoinRoom: (roomId: string) => void;
   onBack: () => void;
+  onCreateRoom: () => void;
+  isAuthenticated: boolean;
+  onLogin?: () => void;
+  currentAddress?: string;
 }
 
 function LobbyView({
@@ -358,127 +523,192 @@ function LobbyView({
   stats,
   onJoinRoom,
   onBack,
+  onCreateRoom,
+  isAuthenticated,
+  onLogin,
+  currentAddress,
 }: LobbyViewProps) {
   const lobbyRooms = rooms.filter(r => r.phase === "lobby");
   const playingRooms = rooms.filter(r => r.phase === "playing");
-  const MIN_PLAYERS = stats?.limits.minPlayersToStart ?? 6;
-  const cooldownSlots = stats?.slots.filter(s => s.state === "cooldown") ?? [];
+  const MIN_PLAYERS = stats?.limits.minPlayersToStart ?? 2;
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  
+  const userRoom = currentAddress ? rooms.find(r => r.creator?.toLowerCase() === currentAddress.toLowerCase() && r.phase !== "ended") : null;
+  const hasActiveRoom = !!userRoom;
 
   return (
     <SpaceBackground>
       <div className="min-h-screen p-8">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <button
-            onClick={onBack}
-            className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
-          >
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-            <span>Back</span>
-          </button>
-
-          <div className="text-center">
-            <h1 className="text-4xl font-bold text-white tracking-wider">
-              GAME <span className="text-cyan-400">LOBBY</span>
-            </h1>
-            <p className="text-gray-400 text-sm mt-1">
-              {isConnected ? "Connected - Select a room to spectate or wait for agents" : "Connecting to server..."}
-            </p>
+        <div className="flex items-center justify-between mb-12">
+          <div className="flex flex-col gap-6">
+            <button
+              onClick={onBack}
+              className="group flex items-center gap-2 text-slate-500 hover:text-white transition-all font-bold text-xs uppercase tracking-widest"
+            >
+              <div className="p-2 rounded-full bg-white/5 group-hover:bg-white/10 transition-colors">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M15 19l-7-7 7-7" />
+                </svg>
+              </div>
+              <span>Back</span>
+            </button>
+            <div className="flex flex-col gap-3">
+              <ConnectButton />
+              <OperatorKeyPanel />
+            </div>
           </div>
 
-          <div className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-4 py-2 border border-slate-700">
-            <div className={`w-3 h-3 rounded-full ${isConnected ? "bg-green-500 animate-pulse" : "bg-red-500"}`} />
-            <span className={`text-sm ${isConnected ? "text-green-400" : "text-red-400"}`}>
-              {isConnected ? "Live" : "Offline"}
-            </span>
+          <div className="text-center">
+            <h1 className="text-6xl font-black text-white tracking-tighter uppercase italic">
+              Operation <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500">Lobby</span>
+            </h1>
+            <div className="flex items-center justify-center gap-2 mt-2">
+              <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? "bg-green-500 animate-pulse" : "bg-red-500"}`} />
+              <p className="text-slate-500 text-[10px] font-black tracking-widest uppercase">
+                {isConnected ? "Sector Secure - Live Feed Active" : "Link Severed - Reconnecting..."}
+              </p>
+            </div>
           </div>
         </div>
 
         <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Panel - Available Rooms */}
-          <div className="lg:col-span-1 bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-700 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-white">Available Rooms</h2>
-              <span className="text-sm text-gray-400">{lobbyRooms.length} lobby / {playingRooms.length} playing</span>
-            </div>
+          <div className="lg:col-span-1 bg-slate-900/40 border border-white/5 rounded-[2rem] overflow-hidden backdrop-blur-2xl shadow-2xl">
+            <div className="px-8 py-6 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
+              <div>
+                <h2 className="text-sm font-black text-white uppercase tracking-widest">Active Missions</h2>
+                <p className="text-[9px] text-slate-500 font-bold uppercase tracking-tight mt-0.5">Scoping available sectors</p>
+              </div>
+                {!hasActiveRoom && (
+                  isAuthenticated ? (
+                    <button
+                      onClick={onCreateRoom}
+                      className="group relative px-4 py-2 rounded-xl bg-white text-slate-900 text-[10px] font-black uppercase tracking-widest transition-all hover:scale-105 overflow-hidden"
+                    >
+                      <div className="absolute inset-0 bg-gradient-to-r from-cyan-400 to-blue-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                      <span className="relative z-10 group-hover:text-white transition-colors">Initialize</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={onLogin}
+                      className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-400 text-[9px] font-black uppercase tracking-widest hover:bg-white/10 transition-colors"
+                    >
+                      Auth Required
+                    </button>
+                  )
+                )}
+              </div>
 
-            <div className="p-4 space-y-3 max-h-[400px] overflow-y-auto">
+            <div className="p-6 space-y-4 max-h-[500px] overflow-y-auto custom-scrollbar">
               {/* Playing rooms first */}
               {playingRooms.map((room) => (
-                <div
+                <motion.div
                   key={room.roomId}
-                  className="p-4 rounded-xl border bg-red-900/20 border-red-600/50 cursor-pointer hover:bg-red-900/30"
+                  whileHover={{ x: 4 }}
+                  className="p-5 rounded-2xl border bg-red-500/[0.03] border-red-500/20 cursor-pointer hover:bg-red-500/[0.06] transition-all relative overflow-hidden group"
                   onClick={() => onJoinRoom(room.roomId)}
                 >
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
+                  <div className="absolute left-0 top-0 bottom-0 w-1 bg-red-500 opacity-30 group-hover:opacity-100 transition-opacity" />
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
                       <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                      <span className="text-white font-bold">{room.roomId}</span>
+                      <span className="text-sm font-black text-white font-mono uppercase tracking-tighter">{room.roomId}</span>
                     </div>
-                    <span className="text-xs px-2 py-1 bg-red-600 text-white rounded">LIVE</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {room.players.slice(0, 6).map((p, i) => (
-                      <div key={i} className="w-6 h-6">
-                        <AmongUsSprite colorId={p.colorId} size={24} />
-                      </div>
-                    ))}
-                    <span className="text-xs text-gray-400">{room.players.length} players</span>
-                  </div>
-                </div>
-              ))}
-
-              {lobbyRooms.length === 0 && playingRooms.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">
-                  <p>No rooms available</p>
-                  <p className="text-sm mt-2">Create one to get started!</p>
-                </div>
-              ) : (
-                lobbyRooms.map((room) => (
-                  <div
-                    key={room.roomId}
-                    className={`p-4 rounded-xl border transition-all cursor-pointer ${
-                      currentRoom?.roomId === room.roomId
-                        ? "bg-cyan-500/20 border-cyan-500/50"
-                        : "bg-slate-700/30 border-slate-600/50 hover:bg-slate-700/50"
-                    }`}
-                    onClick={() => onJoinRoom(room.roomId)}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-white font-bold">{room.roomId}</span>
-                      <span className="text-xs text-gray-400">
-                        {room.players.length}/{room.maxPlayers} players
-                      </span>
+                    <div className="px-2 py-0.5 rounded-md bg-red-500/20 border border-red-500/30 text-[8px] font-black text-red-400 tracking-widest uppercase">
+                      IN_PROGRESS
                     </div>
-                    <div className="flex items-center gap-2">
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
                       {room.players.slice(0, 6).map((p, i) => (
-                        <div key={i} className="w-6 h-6">
+                        <div key={i} className="w-7 h-7 bg-white/5 rounded-lg p-0.5 ring-1 ring-white/5">
                           <AmongUsSprite colorId={p.colorId} size={24} />
                         </div>
                       ))}
                       {room.players.length > 6 && (
-                        <span className="text-xs text-gray-400">+{room.players.length - 6}</span>
+                        <span className="text-[10px] font-black text-slate-500 ml-1">+{room.players.length - 6}</span>
                       )}
                     </div>
+                    <div className="flex items-center gap-1.5 text-[10px] font-black text-slate-500 font-mono tracking-tighter italic">
+                       {room.spectators} OBSERVERS
+                    </div>
                   </div>
+                </motion.div>
+              ))}
+
+              {lobbyRooms.length === 0 && playingRooms.length === 0 ? (
+                <div className="text-center py-20 flex flex-col items-center justify-center">
+                  <div className="w-16 h-16 rounded-full bg-white/5 border border-white/5 flex items-center justify-center mb-4">
+                    <svg className="w-8 h-8 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                  </div>
+                  <p className="text-xs font-black text-slate-600 uppercase tracking-widest italic">No active sectors detected</p>
+                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-tight mt-1 opacity-50">Awaiting commander signal...</p>
+                </div>
+              ) : (
+                lobbyRooms.map((room) => (
+                  <motion.div
+                    key={room.roomId}
+                    whileHover={{ x: 4 }}
+                    className={`p-5 rounded-2xl border transition-all cursor-pointer relative overflow-hidden group ${
+                      currentRoom?.roomId === room.roomId
+                        ? "bg-cyan-500/[0.04] border-cyan-500/30 shadow-[0_0_20px_-5px_rgba(6,182,212,0.15)]"
+                        : "bg-white/[0.02] border-white/5 hover:border-white/10 hover:bg-white/[0.04]"
+                    }`}
+                    onClick={() => onJoinRoom(room.roomId)}
+                  >
+                    <div className={`absolute left-0 top-0 bottom-0 w-1 transition-opacity ${
+                      currentRoom?.roomId === room.roomId ? "bg-cyan-500 opacity-60" : "bg-white opacity-0 group-hover:opacity-10"
+                    }`} />
+                    {room.creator?.toLowerCase() === currentAddress?.toLowerCase() && (
+                      <div className="absolute top-0 right-0 p-1.5">
+                        <div className="px-1.5 py-0.5 rounded-md bg-cyan-500/20 border border-cyan-500/30 text-[6px] font-black text-cyan-400 tracking-tighter uppercase">
+                          YOUR MISSION
+                        </div>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex flex-col">
+                        <span className="text-sm font-black text-white font-mono uppercase tracking-tighter">{room.roomId}</span>
+                        <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-0.5 italic">Awaiting Crew</span>
+                      </div>
+                      <div className="flex flex-col items-end">
+                        <div className="text-[11px] font-black font-mono text-cyan-400">
+                          {room.players.length}<span className="text-slate-600 mx-0.5">/</span>{room.maxPlayers}
+                        </div>
+                        <span className="text-[7px] font-black text-slate-600 uppercase tracking-widest">CAPACITY</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        {room.players.slice(0, 6).map((p, i) => (
+                          <div key={i} className="w-7 h-7 bg-white/5 rounded-lg p-0.5 ring-1 ring-white/5">
+                            <AmongUsSprite colorId={p.colorId} size={24} />
+                          </div>
+                        ))}
+                        {room.players.length > 6 && (
+                          <span className="text-[10px] font-black text-slate-500 ml-1">+{room.players.length - 6}</span>
+                        )}
+                      </div>
+                      <div className="flex flex-col items-end">
+                        <div className="text-[9px] font-black text-slate-500 font-mono italic">
+                           {room.spectators} WATCHING
+                        </div>
+                        {room.wagerAmount && (
+                          <div className="text-[10px] font-black text-cyan-500/60 mt-0.5 font-mono italic">
+                            {(Number(room.wagerAmount) / 1e18).toFixed(2)} MON
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
                 ))
               )}
             </div>
 
-            {/* Cooldown Info */}
-            {cooldownSlots.length > 0 && (
-              <div className="p-4 border-t border-slate-700">
-                <div className="text-sm text-orange-400 text-center">
-                  {cooldownSlots.length} game{cooldownSlots.length > 1 ? 's' : ''} in cooldown
-                </div>
-                <div className="text-xs text-gray-500 text-center mt-1">
-                  Games restart automatically after cooldown
-                </div>
-              </div>
-            )}
-          </div>
+            </div>
 
           {/* Middle Panel - Current Room */}
           <div className="lg:col-span-1 bg-slate-800/50 rounded-2xl border border-cyan-500/50 overflow-hidden">
@@ -541,11 +771,21 @@ function LobbyView({
                         </div>
                       </div>
                     ) : (
-                      <div className="p-4 bg-slate-900/50 rounded-xl">
-                        <div className="text-gray-400">
+                      <div className="p-4 bg-slate-900/50 rounded-xl flex flex-col items-center">
+                        <div className="text-gray-400 mb-4">
                           Waiting for {MIN_PLAYERS - currentRoom.players.length} more agent{MIN_PLAYERS - currentRoom.players.length !== 1 ? "s" : ""}...
                         </div>
-                        <div className="flex justify-center gap-1 mt-2 animate-pulse">
+                        
+                        {currentRoom.creator?.toLowerCase() === currentAddress?.toLowerCase() && (
+                          <button
+                            onClick={() => setShowInviteModal(true)}
+                            className="mb-4 px-4 py-2 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-[10px] font-black uppercase tracking-widest transition-all hover:bg-cyan-500/20"
+                          >
+                            Invite Agents
+                          </button>
+                        )}
+
+                        <div className="flex justify-center gap-1 animate-pulse">
                           <div className="w-2 h-2 bg-cyan-500 rounded-full" />
                           <div className="w-2 h-2 bg-cyan-500 rounded-full" />
                           <div className="w-2 h-2 bg-cyan-500 rounded-full" />
@@ -601,7 +841,237 @@ function LobbyView({
             </div>
           </div>
         </div>
+
+        {/* Invite Modal */}
+        <AnimatePresence>
+          {showInviteModal && userRoom && (
+            <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-xl">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                className="bg-slate-900 border border-white/10 rounded-[2rem] p-8 max-w-md w-full shadow-2xl relative overflow-hidden"
+              >
+                <div className="absolute -top-24 -right-24 w-48 h-48 bg-cyan-500/10 blur-[60px] rounded-full" />
+                
+                <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter mb-2">Invite Agents</h3>
+                <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-8 opacity-60">Populate your sector with autonomous units</p>
+
+                <div className="space-y-6 relative z-10">
+                  <div className="bg-black/40 border border-white/5 rounded-2xl p-5 space-y-4">
+                    <div>
+                      <label className="text-[8px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2 block">Agent Deployment Command</label>
+                      <div className="flex gap-2">
+                        <textarea 
+                          readOnly 
+                          value={`Read ${window.location.origin}/play.md and join sector ${userRoom.roomId}`}
+                          className="flex-1 bg-white/5 border border-white/5 rounded-lg px-3 py-2 text-[10px] font-mono text-cyan-400 outline-none resize-none h-16"
+                        />
+                        <button 
+                          onClick={() => {
+                            navigator.clipboard.writeText(`Read ${window.location.origin}/play.md and follow the instructions to join Among Us On-Chain sector ${userRoom.roomId}`);
+                          }}
+                          className="px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-[10px] font-black text-white uppercase transition-colors"
+                        >
+                          Copy
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-cyan-500/5 border border-cyan-500/10 rounded-xl">
+                    <p className="text-[9px] text-cyan-500/80 font-bold uppercase tracking-wide leading-relaxed">
+                      Share this signal with agent operators. They can use the onboarding guide to deploy autonomous units to your specific sector.
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={() => setShowInviteModal(false)}
+                    className="w-full py-4 bg-white text-slate-900 rounded-2xl font-black uppercase tracking-widest hover:scale-[1.02] transition-all"
+                  >
+                    Dismiss Signal
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
       </div>
     </SpaceBackground>
+  );
+}
+
+function CreateRoomModal({
+  onClose,
+  onCreate,
+}: {
+  onClose: () => void;
+  onCreate: (max: number, imp: number, wager: string) => void;
+}) {
+  const [maxPlayers, setMaxPlayers] = useState(10);
+  const [impostorCount, setImpostorCount] = useState(2);
+  const [wager, setWager] = useState("0.1");
+
+  const playerOptions = [2, 4, 6, 8, 10];
+
+  const containerVariants = {
+    hidden: { opacity: 0, scale: 0.95, y: 20 },
+    visible: { 
+      opacity: 1, 
+      scale: 1, 
+      y: 0,
+      transition: { 
+        duration: 0.3, 
+        ease: "easeOut" as const,
+        staggerChildren: 0.1
+      }
+    }
+  };
+
+  const itemVariants = {
+    hidden: { opacity: 0, y: 10 },
+    visible: { opacity: 1, y: 0 }
+  };
+
+  const handleCreate = () => {
+    try {
+      // Safe conversion for BigInt
+      const wagerNum = parseFloat(wager);
+      if (isNaN(wagerNum) || wagerNum <= 0) {
+        console.error("Invalid wager amount");
+        return;
+      }
+      const weiValue = BigInt(Math.floor(wagerNum * 1e18)).toString();
+      onCreate(maxPlayers, impostorCount, weiValue);
+    } catch (err) {
+      console.error("Wager conversion error:", err);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+      <motion.div
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+        className="bg-slate-900/40 border border-white/10 rounded-[2.5rem] p-10 max-w-lg w-full shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)] backdrop-blur-3xl relative overflow-hidden"
+      >
+        {/* Decorative corner glow */}
+        <div className="absolute -top-20 -right-20 w-40 h-40 bg-cyan-500/10 blur-[60px] rounded-full" />
+        <div className="absolute -bottom-20 -left-20 w-40 h-40 bg-purple-500/10 blur-[60px] rounded-full" />
+
+        <div className="relative z-10">
+          <div className="flex items-center justify-between mb-10">
+            <div>
+              <h2 className="text-3xl font-black text-white tracking-tighter uppercase italic">
+                Create a new <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500">Room</span>
+              </h2>
+            </div>
+            <button 
+              onClick={onClose} 
+              className="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-400 hover:text-white transition-all ring-1 ring-white/5"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <div className="space-y-10">
+            {/* Max Players - Segmented Control */}
+            <motion.div variants={itemVariants}>
+              <div className="flex items-center justify-between mb-4">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Payload Capacity</label>
+                <span className="text-xl font-black text-cyan-400 font-mono tracking-tighter">{maxPlayers} UNITS</span>
+              </div>
+              <div className="grid grid-cols-5 gap-2 bg-black/30 p-1.5 rounded-2xl border border-white/5">
+                {playerOptions.map((num) => (
+                  <button
+                    key={num}
+                    onClick={() => setMaxPlayers(num)}
+                    className={`py-3 rounded-[1rem] text-sm font-black transition-all ${
+                      maxPlayers === num
+                        ? "bg-gradient-to-b from-cyan-400 to-cyan-600 text-slate-900 shadow-lg shadow-cyan-500/20 scale-100"
+                        : "text-slate-500 hover:text-slate-300 hover:bg-white/5 scale-[0.98]"
+                    }`}
+                  >
+                    {num}
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+
+            {/* Impostors - Cards */}
+            <motion.div variants={itemVariants}>
+              <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-4">Threat Level (Impostors)</label>
+              <div className="grid grid-cols-3 gap-4">
+                {[1, 2, 3].map((num) => (
+                  <button
+                    key={num}
+                    onClick={() => setImpostorCount(num)}
+                    className={`group relative aspect-square rounded-[1.5rem] border transition-all overflow-hidden flex flex-col items-center justify-center ${
+                      impostorCount === num
+                        ? "bg-red-500/10 border-red-500/40"
+                        : "bg-black/20 border-white/5 hover:border-white/10"
+                    }`}
+                  >
+                    <div className={`w-12 h-12 mb-2 transition-transform duration-300 ${impostorCount === num ? "scale-110" : "group-hover:scale-105 opacity-50"}`}>
+                      <AmongUsSprite colorId={num === 1 ? 0 : num === 2 ? 1 : 2} size={48} />
+                    </div>
+                    <span className={`text-base font-black ${impostorCount === num ? "text-red-400" : "text-slate-600"}`}>{num} AGENT{num > 1 ? 'S' : ''}</span>
+                    {impostorCount === num && (
+                      <div className="absolute inset-x-0 bottom-0 h-1 bg-red-500/50" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+
+            {/* Wager - Mechanical Input */}
+            <motion.div variants={itemVariants}>
+              <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-4">Mission Deposit (Wager)</label>
+              <div className="group relative">
+                <input
+                  type="text"
+                  value={wager}
+                  onChange={(e) => {
+                    // Only allow numbers and one decimal point
+                    const val = e.target.value;
+                    if (val === "" || /^[0-9]*\.?[0-9]*$/.test(val)) {
+                      setWager(val);
+                    }
+                  }}
+                  className="w-full bg-black/40 border border-white/5 rounded-2xl py-5 px-6 text-2xl font-black text-white font-mono placeholder-slate-700 focus:outline-none focus:border-cyan-500/40 transition-all focus:ring-4 focus:ring-cyan-500/5 shadow-inner"
+                  placeholder="0.00"
+                />
+                <div className="absolute right-6 top-1/2 -translate-y-1/2 flex items-center gap-2 pointer-events-none">
+                  <div className="w-px h-6 bg-white/10 mr-2" />
+                  <span className="text-xl font-black text-slate-600 tracking-tighter font-mono italic">MON</span>
+                </div>
+              </div>
+              <div className="mt-4 flex items-start gap-2 px-1">
+                <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-1 flex-shrink-0 animate-pulse" />
+                <p className="text-[10px] text-slate-500 leading-relaxed font-bold tracking-tight">
+                  MANDATORY DEPOSIT COLD STAKED ON-CHAIN. REWARDS DISTRIBUTED UPON SUCCESSFUL MISSION COMPLETION.
+                </p>
+              </div>
+            </motion.div>
+
+            <motion.button
+              whileHover={{ scale: 1.02, y: -2 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={handleCreate}
+              className="w-full py-6 rounded-3xl bg-white text-slate-900 font-black text-lg uppercase tracking-widest shadow-[0_20px_40px_-15px_rgba(255,255,255,0.2)] hover:shadow-[0_25px_50px_-12px_rgba(255,255,255,0.3)] transition-all flex items-center justify-center gap-3 relative overflow-hidden group"
+            >
+              <div className="absolute inset-0 bg-gradient-to-r from-cyan-400 to-blue-500 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+              <span className="relative z-10 group-hover:text-white transition-colors">Start Deployment</span>
+              <svg className="w-6 h-6 relative z-10 transition-transform group-hover:translate-x-1 group-hover:text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+              </svg>
+            </motion.button>
+          </div>
+        </div>
+      </motion.div>
+    </div>
   );
 }
