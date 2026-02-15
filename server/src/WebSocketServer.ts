@@ -966,21 +966,28 @@ export class WebSocketRelayServer {
     );
 
     // Create game on-chain (async, don't block game flow)
+    // Skip on-chain creation if we have fewer than 4 players (contract minimum)
     const playerAddresses = room.players.map((p) => p.address);
-    contractService
-      .createGame(roomId, playerAddresses, impostorAddresses)
-      .then((success) => {
-        if (success) {
-          logger.info(`Game ${roomId} created on-chain successfully`);
-        } else {
-          logger.warn(
-            `Failed to create game ${roomId} on-chain (continuing in off-chain mode)`,
-          );
-        }
-      })
-      .catch((err) => {
-        logger.error(`Error creating game ${roomId} on-chain:`, err);
-      });
+    if (playerAddresses.length >= 4) {
+      contractService
+        .createGame(roomId, playerAddresses, impostorAddresses)
+        .then((success) => {
+          if (success) {
+            logger.info(`Game ${roomId} created on-chain successfully`);
+          } else {
+            logger.warn(
+              `Failed to create game ${roomId} on-chain (continuing in off-chain mode)`,
+            );
+          }
+        })
+        .catch((err) => {
+          logger.error(`Error creating game ${roomId} on-chain:`, err);
+        });
+    } else {
+      logger.info(
+        `Game ${roomId} running in off-chain mode (${playerAddresses.length} players, contract requires 4+)`,
+      );
+    }
 
     // Broadcast game start (phase change)
     this.broadcastToRoom(roomId, {
@@ -2388,27 +2395,34 @@ export class WebSocketRelayServer {
       winningsPerPlayer: wagerResult.winningsPerPlayer,
     });
 
-    contractService
-      .settleGame(
-        roomId,
-        crewmatesWon,
-        winners,
-        playerAddresses,
-        playerKills,
-        playerTasks,
-      )
-      .then((success) => {
-        if (success) {
-          logger.info(`Game ${roomId} settled on-chain successfully`);
-          // Update database with settlement tx hash
-          // (would need to modify settleGame to return tx hash)
-        } else {
-          logger.warn(`Failed to settle game ${roomId} on-chain`);
-        }
-      })
-      .catch((err) => {
-        logger.error(`Error settling game ${roomId} on-chain:`, err);
-      });
+    // Settle game on-chain only if it was created on-chain (4+ players)
+    if (playerAddresses.length >= 4) {
+      contractService
+        .settleGame(
+          roomId,
+          crewmatesWon,
+          winners,
+          playerAddresses,
+          playerKills,
+          playerTasks,
+        )
+        .then((success) => {
+          if (success) {
+            logger.info(`Game ${roomId} settled on-chain successfully`);
+            // Update database with settlement tx hash
+            // (would need to modify settleGame to return tx hash)
+          } else {
+            logger.warn(`Failed to settle game ${roomId} on-chain`);
+          }
+        })
+        .catch((err) => {
+          logger.error(`Error settling game ${roomId} on-chain:`, err);
+        });
+    } else {
+      logger.info(
+        `Game ${roomId} ended in off-chain mode (${playerAddresses.length} players)`,
+      );
+    }
 
     room.phase = "ended";
     if (extended) {
