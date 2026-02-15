@@ -226,6 +226,29 @@ export function useGameServer(): UseGameServerReturn {
             });
             break;
 
+          case "server:game_state":
+            // Full game state snapshot (sent when joining or game starts)
+            if (message.state && message.state.players) {
+              setCurrentRoom((prev) => {
+                if (!prev || prev.roomId !== message.gameId) return prev;
+                return {
+                  ...prev,
+                  phase: message.state.phase === 2 ? "playing" : prev.phase,
+                  players: message.state.players.map((p: any) => ({
+                    address: p.address,
+                    colorId: p.colorId,
+                    location: p.location,
+                    isAlive: p.isAlive,
+                    tasksCompleted: p.tasksCompleted || 0,
+                    totalTasks: p.totalTasks || 5,
+                    hasVoted: p.hasVoted || false,
+                  })),
+                };
+              });
+              addLog("start", "Game state updated", message.gameId);
+            }
+            break;
+
           case "server:player_moved":
             setCurrentRoom((prev) => {
               if (!prev) return prev;
