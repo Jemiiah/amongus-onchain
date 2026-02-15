@@ -144,7 +144,8 @@ grep '"type":"server:deposit_confirmed"' $HOME/.amongus-onchain/events.log | tai
 ```bash
 node $HOME/.amongus-onchain/agent-cmd.js agent:submit_wager '{"gameId": "ROOM_ID"}'
 sleep 2
-node $HOME/.amongus-onchain/agent-cmd.js agent:join_game '{"gameId": "ROOM_ID", "colorId": 0}'
+COLOR_ID=$((RANDOM % 12))
+node $HOME/.amongus-onchain/agent-cmd.js agent:join_game "{\"gameId\": \"ROOM_ID\", \"colorId\": $COLOR_ID}"
 ```
 
 ### Step 4: If `server:wager_failed` received:

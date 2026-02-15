@@ -80,6 +80,7 @@ function HomeInner({
   const [ejectedPlayer, setEjectedPlayer] = useState<Player | null>(null);
   const [gameWon, setGameWon] = useState(true);
   const [spotlightedPlayer, setSpotlightedPlayer] = useState<`0x${string}` | null>(null);
+  const [selectedAgentInfo, setSelectedAgentInfo] = useState<`0x${string}` | null>(null);
   const [showCreateRoomModal, setShowCreateRoomModal] = useState(false);
   const [showGameInviteModal, setShowGameInviteModal] = useState(false);
 
@@ -283,47 +284,50 @@ function HomeInner({
               onSpotlightPlayer={setSpotlightedPlayer}
             />
 
-            {/* Task bar - overlay at top */}
+            {/* Top bar - clean layout */}
             <div className="fixed top-0 left-0 right-0 z-40 p-4 pointer-events-none">
-              <div className="grid grid-cols-3 items-start w-full">
-                {/* Top Left - Wallet & Operator Key */}
-                <div className="flex flex-col gap-2 pointer-events-auto">
-                  <ConnectButton />
-                  <OperatorKeyPanel />
+              <div className="flex items-start justify-between w-full">
+                {/* Left side - minimal wallet indicator */}
+                <div className="pointer-events-auto flex items-center gap-2">
+                  <div className="scale-90 origin-left">
+                    <ConnectButton />
+                  </div>
                 </div>
-                
-                {/* Centered TaskBar */}
-                <div className="flex justify-center pointer-events-auto">
+
+                {/* Center - TaskBar prominently displayed */}
+                <div className="pointer-events-auto absolute left-1/2 -translate-x-1/2">
                   <TaskBar completed={tasksCompleted} total={totalTasks} />
                 </div>
-                
-                {/* Space for top-right controls */}
-                <div className="pointer-events-none" />
+
+                {/* Right side - connection status & invite */}
+                <div className="pointer-events-auto flex items-center gap-3">
+                  {/* Connection badge */}
+                  <div className="flex items-center gap-2 bg-slate-900/80 backdrop-blur-sm rounded-lg px-3 py-1.5 border border-slate-700/50">
+                    <div className={`w-2 h-2 rounded-full animate-pulse ${isConnected ? "bg-green-500" : "bg-red-500"}`} />
+                    <span className="text-slate-200 text-xs font-medium">
+                      {isConnected ? "Live" : "Disconnected"}
+                    </span>
+                  </div>
+
+                  {/* Invite Agent Button */}
+                  {currentRoom && (
+                    <button
+                      onClick={() => setShowGameInviteModal(true)}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-xl shadow-lg border border-emerald-400/30 flex items-center gap-2 transition-all transform hover:scale-105"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
+                      <span className="text-sm">INVITE AGENT</span>
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 
-            {/* Top Right Controls */}
-            <div className="fixed top-4 right-4 z-50 flex flex-col items-end gap-3">
-              {/* Connection badge */}
-              <div className="flex items-center gap-2 bg-slate-900/80 backdrop-blur-sm rounded-lg px-4 py-2 border border-slate-700/50">
-                <div className={`w-2 h-2 rounded-full animate-pulse ${isConnected ? "bg-green-500" : "bg-red-500"}`} />
-                <span className="text-slate-200 text-xs font-medium">
-                  {isConnected ? "Live" : "Disconnected"}
-                </span>
-              </div>
-
-              {/* Invite Agent Button */}
-              {currentRoom && (
-                <button
-                  onClick={() => setShowGameInviteModal(true)}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-5 rounded-xl shadow-lg border border-emerald-400/30 flex items-center gap-2 transition-all transform hover:scale-105"
-                >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                  <span>INVITE AGENT</span>
-                </button>
-              )}
+            {/* Operator Key Panel - bottom left corner */}
+            <div className="fixed bottom-4 left-4 z-40">
+              <OperatorKeyPanel />
             </div>
 
             {/* Right sidebar - overlay */}
@@ -351,39 +355,89 @@ function HomeInner({
                 <div className="space-y-2 max-h-52 overflow-y-auto">
                   {players.map((player) => {
                     const isSpotlighted = player.address === spotlightedPlayer;
+                    const isInfoOpen = player.address === selectedAgentInfo;
                     return (
-                      <div
-                        key={player.address}
-                        onClick={() => {
-                          if (player.isAlive) {
-                            setSpotlightedPlayer(isSpotlighted ? null : player.address);
-                          }
-                        }}
-                        className={`flex items-center gap-2 p-2 rounded cursor-pointer transition-all ${
-                          !player.isAlive ? "opacity-40" : "hover:bg-white/10"
-                        } ${isSpotlighted ? "bg-yellow-900/50 ring-2 ring-yellow-500" : ""}`}
-                      >
-                        <div className="relative">
-                          <AmongUsSprite colorId={player.colorId} size={28} showShadow={false} />
-                          {isSpotlighted && (
-                            <div className="absolute -top-1 -right-1 w-4 h-4 bg-yellow-500 rounded-full flex items-center justify-center">
-                              <span className="text-[8px] text-black font-bold">*</span>
+                      <div key={player.address} className="relative">
+                        <div
+                          onClick={() => {
+                            if (player.isAlive) {
+                              setSpotlightedPlayer(isSpotlighted ? null : player.address);
+                            }
+                            setSelectedAgentInfo(isInfoOpen ? null : player.address);
+                          }}
+                          className={`flex items-center gap-2 p-2 rounded cursor-pointer transition-all ${
+                            !player.isAlive ? "opacity-40" : "hover:bg-white/10"
+                          } ${isSpotlighted ? "bg-yellow-900/50 ring-2 ring-yellow-500" : ""}`}
+                        >
+                          <div className="relative">
+                            <AmongUsSprite colorId={player.colorId} size={28} showShadow={false} />
+                            {isSpotlighted && (
+                              <div className="absolute -top-1 -right-1 w-4 h-4 bg-yellow-500 rounded-full flex items-center justify-center">
+                                <span className="text-[8px] text-black font-bold">*</span>
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className="text-sm font-bold truncate"
+                                style={{ color: PlayerColors[player.colorId]?.light || "#fff" }}
+                              >
+                                {PlayerColors[player.colorId]?.name || `Player ${player.colorId}`}
+                              </span>
+                              {!player.isAlive && <span className="text-red-500 text-[10px] font-bold">DEAD</span>}
                             </div>
-                          )}
+                            <div className="text-[10px] text-cyan-400/70 font-mono truncate">
+                              {player.address.slice(0, 6)}...{player.address.slice(-4)}
+                            </div>
+                            <span className="text-[10px] text-gray-500">
+                              {LocationNames[player.location] || "Unknown"}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            {isSpotlighted && <span className="text-yellow-400 text-sm">*</span>}
+                            <svg className={`w-4 h-4 transition-transform ${isInfoOpen ? "rotate-180 text-cyan-400" : "text-gray-500"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </div>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <span
-                            className="text-sm font-bold block truncate"
-                            style={{ color: PlayerColors[player.colorId]?.light || "#fff" }}
+                        {/* Agent Info Popup */}
+                        {isInfoOpen && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: "auto" }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="mt-1 p-3 bg-slate-800/90 rounded-lg border border-cyan-500/30 text-xs"
                           >
-                            {PlayerColors[player.colorId]?.name || `Player ${player.colorId}`}
-                          </span>
-                          <span className="text-xs text-gray-400">
-                            {LocationNames[player.location] || "Unknown"}
-                          </span>
-                        </div>
-                        {!player.isAlive && <span className="text-red-500 text-xs font-bold">DEAD</span>}
-                        {isSpotlighted && <span className="text-yellow-400 text-sm">*</span>}
+                            <div className="space-y-2">
+                              <div className="flex justify-between">
+                                <span className="text-gray-400">Address:</span>
+                                <span className="text-cyan-400 font-mono">{player.address.slice(0, 10)}...{player.address.slice(-8)}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-gray-400">Status:</span>
+                                <span className={player.isAlive ? "text-green-400" : "text-red-400"}>{player.isAlive ? "Alive" : "Dead"}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-gray-400">Location:</span>
+                                <span className="text-white">{LocationNames[player.location] || "Unknown"}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-gray-400">Color:</span>
+                                <span style={{ color: PlayerColors[player.colorId]?.light }}>{PlayerColors[player.colorId]?.name}</span>
+                              </div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigator.clipboard.writeText(player.address);
+                                }}
+                                className="w-full mt-2 py-1.5 bg-white/5 hover:bg-white/10 rounded text-gray-300 text-[10px] font-bold uppercase tracking-wider transition-colors"
+                              >
+                                Copy Full Address
+                              </button>
+                            </div>
+                          </motion.div>
+                        )}
                       </div>
                     );
                   })}
