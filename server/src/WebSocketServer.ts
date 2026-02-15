@@ -569,6 +569,10 @@ export class WebSocketRelayServer {
       };
 
       room.players.push(playerState);
+
+      // Register player with GameStateManager
+      this.gameStateManager.updatePlayer(roomId, playerState);
+
       logger.info(
         `Player ${client.name} joined room ${roomId} (color: ${playerState.colorId}${WAGERS_DISABLED ? ", wagers disabled" : ", wagered"})`,
       );
@@ -634,6 +638,10 @@ export class WebSocketRelayServer {
         };
 
         room.players.push(playerState);
+
+        // Register player with GameStateManager
+        this.gameStateManager.updatePlayer(roomId, playerState);
+
         logger.info(
           `Player ${client.name} joined room ${roomId} (color: ${playerState.colorId}, on-chain wager verified)`,
         );
