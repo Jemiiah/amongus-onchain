@@ -1,220 +1,25 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
-import { usePrivy } from "@privy-io/react-auth";
-import { usePrivyEnabled } from "@/components/layout/Providers";
-import { generateOperatorKey } from "@/lib/operatorKeys";
-import { api } from "@/lib/api";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
-const STORAGE_KEY = "amongus-operator-key";
-
-interface OperatorKeyData {
-  operatorKey: string;
-  walletAddress: string;
-  createdAt: number;
-}
+import { useOperatorKey } from "@/hooks/useOperatorKey";
 
 export function OperatorKeyPanel() {
-  const privyEnabled = usePrivyEnabled();
-  const { authenticated, user, getAccessToken } = usePrivy();
-
-  const [operatorKey, setOperatorKey] = useState<OperatorKeyData | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const { operatorKey, loading, error, regenerateKey, isAuthOrConnected } = useOperatorKey();
   const [showKey, setShowKey] = useState(false);
-
-  const walletAddress = user?.wallet?.address;
-
-  // Load saved key from localStorage
-  useEffect(() => {
-    if (!walletAddress) return;
-
-    const saved = localStorage.getItem(`${STORAGE_KEY}-${walletAddress.toLowerCase()}`);
-    if (saved) {
-      try {
-        const data = JSON.parse(saved) as OperatorKeyData;
-        setOperatorKey(data);
-      } catch {
-        localStorage.removeItem(`${STORAGE_KEY}-${walletAddress.toLowerCase()}`);
-      }
-    }
-  }, [walletAddress]);
-
-  // Validate key with server
-  const validateKeyWithServer = useCallback(async (key: string): Promise<boolean> => {
-    try {
-      const res = await fetch(`${API_URL}/api/operators/me`, {
-        headers: { Authorization: `Bearer ${key}` },
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
-  }, []);
-
-  // Register key with server
-  const registerKeyWithServer = useCallback(async (key: string, wallet: string): Promise<boolean> => {
-    try {
-      const res = await fetch(`${API_URL}/api/operators`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${key}`,
-        },
-        body: JSON.stringify({ walletAddress: wallet }),
-      });
-
-      // 201 = created, 409 = already exists (which is fine)
-      return res.status === 201 || res.status === 409;
-    } catch {
-      return false;
-    }
-  }, []);
-
-  // Generate and register a new operator key
-  const generateAndRegisterKey = useCallback(async () => {
-    if (!walletAddress) return;
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      // Generate a new key
-      const newKey = generateOperatorKey();
-
-      // Register with server
-      const registered = await registerKeyWithServer(newKey, walletAddress);
-
-      if (!registered) {
-        throw new Error("Failed to register key with server");
-      }
-
-      // Save locally
-      const keyData: OperatorKeyData = {
-        operatorKey: newKey,
-        walletAddress: walletAddress.toLowerCase(),
-        createdAt: Date.now(),
-      };
-
-      localStorage.setItem(`${STORAGE_KEY}-${walletAddress.toLowerCase()}`, JSON.stringify(keyData));
-      setOperatorKey(keyData);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to generate key");
-    } finally {
-      setLoading(false);
-    }
-  }, [walletAddress, registerKeyWithServer]);
-
-  // On mount: validate existing key or generate new one
-  // Use a ref to prevent multiple initializations
-  const [initialized, setInitialized] = useState(false);
-
-  useEffect(() => {
-    if (!walletAddress || loading || initialized) return;
-
-    const initKey = async () => {
-      setInitialized(true);
-      setLoading(true);
-      setError(null);
-
-      try {
-        // 1. Check if we already have a key in state (loaded from useEffect above)
-        // or in localStorage directly as a fallback
-        let currentKeyData = operatorKey;
-        if (!currentKeyData) {
-          const saved = localStorage.getItem(`${STORAGE_KEY}-${walletAddress.toLowerCase()}`);
-          if (saved) {
-            try {
-              currentKeyData = JSON.parse(saved) as OperatorKeyData;
-            } catch (e) {
-              console.error("Failed to parse saved operator key:", e);
-            }
-          }
-        }
-
-        // 2. If we have a saved key, validate it
-        if (currentKeyData) {
-          console.log("Validating existing operator key from storage...");
-          const isValid = await validateKeyWithServer(currentKeyData.operatorKey);
-          if (isValid) {
-            console.log("Existing operator key is valid.");
-            setOperatorKey(currentKeyData);
-            setLoading(false);
-            return;
-          }
-          console.log("Existing operator key is invalid on server.");
-        }
-
-        // 3. Try to fetch existing key from backend using Privy auth
-        console.log("Attempting to recover operator key from backend...");
-        const token = await getAccessToken();
-        if (token) {
-          const result = await api.getActiveOperatorKey(token);
-          if (result.success && result.operatorKey) {
-            console.log("Successfully recovered operator key from backend.");
-            const keyData: OperatorKeyData = {
-              operatorKey: result.operatorKey,
-              walletAddress: walletAddress.toLowerCase(),
-              createdAt: result.createdAt || Date.now(),
-            };
-            localStorage.setItem(`${STORAGE_KEY}-${walletAddress.toLowerCase()}`, JSON.stringify(keyData));
-            setOperatorKey(keyData);
-            setLoading(false);
-            return;
-          }
-        }
-
-        // 4. No key found anywhere or existing key invalid, generate a new one
-        console.log("No existing operator key found. Generating new one...");
-        await generateAndRegisterKey();
-      } catch (err) {
-        console.error("Error during operator key initialization:", err);
-        setError("Failed to initialize operator key");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    initKey();
-  }, [walletAddress, operatorKey, loading, initialized, validateKeyWithServer, registerKeyWithServer, generateAndRegisterKey, getAccessToken]);
-
-  // Reset initialized when wallet changes
-  useEffect(() => {
-    setInitialized(false);
-  }, [walletAddress]);
+  const [copied, setCopied] = useState(false);
 
   const copyToClipboard = async () => {
     if (!operatorKey) return;
-
     try {
       await navigator.clipboard.writeText(operatorKey.operatorKey);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setError("Failed to copy to clipboard");
-    }
+    } catch {}
   };
 
-  const regenerateKey = async () => {
-    if (!walletAddress) return;
+  if (!isAuthOrConnected) return null;
 
-    // Clear existing key
-    localStorage.removeItem(`${STORAGE_KEY}-${walletAddress.toLowerCase()}`);
-    setOperatorKey(null);
-
-    // Generate new one
-    await generateAndRegisterKey();
-  };
-
-  // Don't render if Privy is not enabled or not authenticated
-  if (!privyEnabled || !authenticated || !walletAddress) {
-    return null;
-  }
-
-  // Loading state
   if (loading || !operatorKey) {
     return (
       <motion.div
